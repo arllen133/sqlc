@@ -40,14 +40,15 @@ func setupTestDB(t *testing.T) (*sql.DB, *sqlc.Session) {
 	}
 
 	// Create table if not exists (Basic schema for simple tests)
-	if driver == "sqlite3" {
+	switch driver {
+	case "sqlite3":
 		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS users (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			username TEXT,
 			email TEXT,
 			created_at DATETIME
 		)`)
-	} else if driver == "mysql" {
+	case "mysql":
 		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS users (
 			id BIGINT PRIMARY KEY AUTO_INCREMENT,
 			username VARCHAR(255),
@@ -56,7 +57,7 @@ func setupTestDB(t *testing.T) (*sql.DB, *sqlc.Session) {
 		)`)
 		// Truncate to ensure clean state for MySQL/PG which persist
 		db.Exec("TRUNCATE TABLE users")
-	} else if driver == "postgres" {
+	case "postgres":
 		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS users (
 			id SERIAL PRIMARY KEY,
 			username TEXT,
