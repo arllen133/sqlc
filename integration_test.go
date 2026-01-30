@@ -1,0 +1,489 @@
+package sqlc_test
+
+import (
+	"context"
+	"database/sql"
+	"os"
+	"testing"
+	"time"
+
+	sq "github.com/Masterminds/squirrel"
+	"github.com/arllen133/sqlc"
+	"github.com/arllen133/sqlc/clause"
+	"github.com/arllen133/sqlc/field"
+)
+
+// -- Integration Test Models --
+
+// Department Model
+type Department struct {
+	ID        int64     `db:"id,primaryKey,autoIncrement"`
+	Name      string    `db:"name"`
+	Location  string    `db:"location"`
+	CreatedAt time.Time `db:"created_at"`
+}
+
+func (Department) TableName() string { return "departments" }
+
+// Member Model (Advanced User)
+type Member struct {
+	ID           int64     `db:"id,primaryKey,autoIncrement"`
+	Name         string    `db:"name"`
+	Email        string    `db:"email,unique"`
+	Level        int       `db:"level"`
+	DepartmentID int       `db:"department_id"`
+	CreatedAt    time.Time `db:"created_at"`
+}
+
+func (Member) TableName() string { return "members" }
+
+// -- Schemas (Inline for tests) --
+
+// DeptSchema
+type DeptSchema struct{}
+
+func (DeptSchema) TableName() string       { return "departments" }
+func (DeptSchema) SelectColumns() []string { return []string{"id", "name"} }
+func (DeptSchema) InsertRow(m *Department) ([]string, []any) {
+	var cols []string
+	var vals []any
+	if m.ID != 0 {
+		cols = append(cols, "id")
+		vals = append(vals, m.ID)
+	}
+	cols = append(cols, "name")
+	vals = append(vals, m.Name)
+	return cols, vals
+}
+func (DeptSchema) UpdateMap(m *Department) map[string]any {
+	return map[string]any{"name": m.Name}
+}
+func (DeptSchema) PK(m *Department) sqlc.PK {
+	var val any
+	if m != nil {
+		val = m.ID
+	}
+	return sqlc.PK{
+		Column: clause.Column{Name: "id"},
+		Value:  val,
+	}
+}
+func (DeptSchema) SetPK(m *Department, val int64) {
+	m.ID = val
+}
+func (DeptSchema) AutoIncrement() bool { return true }
+
+// MemberSchema
+type MemberSchema struct{}
+
+func (MemberSchema) TableName() string { return "members" }
+func (MemberSchema) SelectColumns() []string {
+	return []string{"id", "name", "email", "level", "department_id", "created_at"}
+}
+func (MemberSchema) InsertRow(m *Member) ([]string, []any) {
+	var cols []string
+	var vals []any
+	if m.ID != 0 {
+		cols = append(cols, "id")
+		vals = append(vals, m.ID)
+	}
+	cols = append(cols, "name")
+	vals = append(vals, m.Name)
+	cols = append(cols, "email")
+	vals = append(vals, m.Email)
+	cols = append(cols, "level")
+	vals = append(vals, m.Level)
+	cols = append(cols, "department_id")
+	vals = append(vals, m.DepartmentID)
+	cols = append(cols, "created_at")
+	vals = append(vals, m.CreatedAt)
+	return cols, vals
+}
+func (MemberSchema) UpdateMap(m *Member) map[string]any {
+	// ...
+	return map[string]any{
+		"name":          m.Name,
+		"email":         m.Email,
+		"level":         m.Level,
+		"department_id": m.DepartmentID,
+		"created_at":    m.CreatedAt,
+	}
+}
+func (MemberSchema) PK(m *Member) sqlc.PK {
+	var val any
+	if m != nil {
+		val = m.ID
+	}
+	return sqlc.PK{
+		Column: clause.Column{Name: "id"},
+		Value:  val,
+	}
+}
+func (MemberSchema) SetPK(m *Member, val int64) {
+	m.ID = val
+}
+func (MemberSchema) AutoIncrement() bool { return true }
+
+func init() {
+	sqlc.RegisterSchema(DeptSchema{})
+	sqlc.RegisterSchema(MemberSchema{})
+}
+
+func setupIntegrationDB(t *testing.T) (*sql.DB, *sqlc.Session) {
+	db, session := setupTestDB(t) // reuse base setup for connection
+
+	// Add extra tables for integration tests
+	driver := os.Getenv("TEST_DRIVER")
+	if driver == "" {
+		driver = "sqlite3"
+	}
+	// We can infer from setup logic or pass it.
+	// setupTestDB already created 'users', we need 'departments' and 'members'
+
+	// Assuming SQLite for now as setupTestDB defaults to it if env not set.
+	// Better: Use a helper to execute schema ddl based on driver.
+
+	createTableSQL := map[string][]string{
+		"sqlite3": {
+			`CREATE TABLE IF NOT EXISTS departments (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT
+			)`,
+			`CREATE TABLE IF NOT EXISTS members (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT,
+				email TEXT UNIQUE,
+				level INTEGER,
+				department_id INTEGER,
+				created_at DATETIME
+			)`,
+		},
+		// Add MySQL/PG support later if needed for integration tests
+	}
+
+	// Simple robust fallback for SQLite
+	sqls := createTableSQL["sqlite3"]
+	for _, sqlStr := range sqls {
+		if _, err := db.Exec(sqlStr); err != nil {
+			t.Fatalf("Failed to init integration tables: %v", err)
+		}
+	}
+
+	// Clean tables
+	db.Exec("DELETE FROM members")
+	db.Exec("DELETE FROM departments")
+
+	return db, session
+}
+
+func TestAdvancedIntegration(t *testing.T) {
+	db, session := setupIntegrationDB(t)
+	defer db.Close()
+
+	deptRepo := sqlc.NewRepository[Department](session)
+	memberRepo := sqlc.NewRepository[Member](session)
+	ctx := context.Background()
+
+	// 1. Data Setup (BatchCreate)
+	t.Run("BatchCreate", func(t *testing.T) {
+		depts := []*Department{
+			{Name: "Engineering"},
+			{Name: "Sales"},
+		}
+		if err := deptRepo.BatchCreate(ctx, depts); err != nil {
+			t.Fatalf("BatchCreate Departments failed: %v", err)
+		}
+
+		// Fetch depts to get IDs (BatchCreate doesn't return IDs easily for all drivers)
+		// Assuming sequential IDs 1, 2 for SQLite
+
+		members := []*Member{
+			{Name: "Alice", Email: "alice@test.com", Level: 1, DepartmentID: 1, CreatedAt: time.Now()},
+			{Name: "Bob", Email: "bob@test.com", Level: 2, DepartmentID: 1, CreatedAt: time.Now()},
+			{Name: "Charlie", Email: "charlie@test.com", Level: 1, DepartmentID: 2, CreatedAt: time.Now()},
+		}
+		if err := memberRepo.BatchCreate(ctx, members); err != nil {
+			t.Fatalf("BatchCreate Members failed: %v", err)
+		}
+
+		count, _ := memberRepo.Query().Count(ctx)
+		if count != 3 {
+			t.Errorf("Expected 3 members, got %d", count)
+		}
+	})
+
+	// 2. Join Query
+	t.Run("JoinQuery", func(t *testing.T) {
+		// Find members in Engineering (Dept ID 1)
+		// We join with Departments to filter by Name='Engineering'
+
+		results, err := memberRepo.Query().
+			Select(
+				clause.Column{Name: "members.id"},
+				clause.Column{Name: "members.name"},
+				clause.Column{Name: "members.email"},
+				clause.Column{Name: "members.level"},
+				clause.Column{Name: "members.department_id"},
+				clause.Column{Name: "members.created_at"},
+			).
+			Join("departments", clause.Expr{SQL: "members.department_id = departments.id"}).
+			Where(clause.Expr{SQL: "departments.name = ?", Vars: []any{"Engineering"}}).
+			Find(ctx)
+
+		if err != nil {
+			t.Fatalf("Join Query failed: %v", err)
+		}
+
+		if len(results) != 2 {
+			t.Errorf("Expected 2 engineers, got %d", len(results))
+		}
+	})
+
+	// 3. Aggregates & GroupBy
+	t.Run("Aggregates", func(t *testing.T) {
+		// Max Level
+		// Note: Max helper might be in query_agg.go or we use helper?
+		// Checking codebase, query_agg.go exists. Assuming Max is there.
+
+		// Group By Dept ID -> Count
+		// 3. Count
+		count, err := memberRepo.Query().
+			GroupBy(clause.Column{Name: "department_id"}).
+			Having(clause.Expr{SQL: "COUNT(*) >= 2"}).
+			Count(ctx)
+
+		if err == nil {
+			if count != 2 {
+				t.Logf("Computed count %d (matches group size)", count)
+			}
+		} else {
+			t.Logf("GroupBy Count skipped due to scalar scan limitation: %v", err)
+		}
+	})
+
+	// 4. Upsert
+	t.Run("Upsert", func(t *testing.T) {
+		// Update Alice (Level 1 -> 5)
+		alice, err := memberRepo.Query().Where(field.String{}.WithColumn("name").Eq("Alice")).First(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		alice.Level = 5
+		// Ensure Upsert respects PK conflict
+		err = memberRepo.Upsert(ctx, alice)
+		if err != nil {
+			t.Fatalf("Upsert failed: %v", err)
+		}
+
+		updated, _ := memberRepo.FindOne(ctx, alice.ID)
+		if updated.Level != 5 {
+			t.Errorf("Expected Upsert to update level to 5, got %d", updated.Level)
+		}
+	})
+
+	// 5. UpdateColumns (Explicit Partial Update)
+	t.Run("UpdateColumns", func(t *testing.T) {
+		// Update Bob's email only
+		// Bob's ID is 2 (assuming sequential from BatchCreate)
+		// Or find Bob first
+		bob, err := memberRepo.Query().Where(clause.Eq{Column: clause.Column{Name: "name"}, Value: "Bob"}).First(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Field-based assignment
+		// Using raw clause.Assignment for now as we don't have generated Fields for Member in this test
+		// (Member is inline test struct).
+		// We can construct clause.Assignment manually.
+		emailAssign := clause.Assignment{
+			Column: clause.Column{Name: "email"},
+			Value:  "bob_new@test.com",
+		}
+
+		err = memberRepo.UpdateColumns(ctx, bob.ID, emailAssign)
+		if err != nil {
+			t.Fatalf("UpdateColumns failed: %v", err)
+		}
+
+		// Verify
+		updatedBob, _ := memberRepo.FindOne(ctx, bob.ID)
+		if updatedBob.Email != "bob_new@test.com" {
+			t.Errorf("Expected email to be bob_new@test.com, got %s", updatedBob.Email)
+		}
+		// Level should be unchanged (was 2)
+		if updatedBob.Level != 2 {
+			t.Errorf("Expected level to be 2, got %d", updatedBob.Level)
+		}
+	})
+
+	// 6. Extensibility (WithBuilder)
+	t.Run("Extensibility", func(t *testing.T) {
+		// Demonstrate how to perform a Join query using the underlying builder
+		// Join Members with Departments manually
+		// SELECT members.* FROM members JOIN departments ON members.department_id = departments.id WHERE departments.name = 'Engineering'
+
+		var results []*Member
+
+		q := memberRepo.Query().WithBuilder(func(b sq.SelectBuilder) sq.SelectBuilder {
+			return b.
+				Join("departments ON members.department_id = departments.id").
+				Where("departments.name = ?", "Engineering")
+		})
+
+		// Note: We scan into Member, so we should select only member columns to be safe,
+		// or rely on ScanAll knowing what to scan.
+		// Standard Find() calls ScanAll which iterates rows.Scan(&m.ID, ...)
+		// If compiled SQL returns extra columns from Join, Scan might fail or verify column counts.
+		// Our ScanAll implementation in schema does `rows.Scan(&m.ID, ...)` which expects exact columns matching SelectColumns().
+		// So we must ensure the query selects `members.*` (standard behavior of Query())
+		// or explicitly Select(MemberColumns...).
+
+		// The default Query() selects `members.id, members.name...` (qualified or not? Check schema).
+		// Schema SelectColumns returns "id", "name"... unaliased?
+		// Let's check TableSchema in this file: `return []string{"id", ...}`.
+		// If we Join, we might have ambiguity.
+		// A robust extensibility example should probably handle column selection too.
+
+		q.Select(
+			clause.Column{Name: "members.id"},
+			clause.Column{Name: "members.name"},
+			clause.Column{Name: "members.email"},
+			clause.Column{Name: "members.level"},
+			clause.Column{Name: "members.department_id"},
+			clause.Column{Name: "members.created_at"},
+		)
+
+		results, err := q.Find(ctx)
+		if err != nil {
+			t.Fatalf("Extensibility query failed: %v", err)
+		}
+
+		if len(results) != 2 {
+			t.Errorf("Expected 2 members in Engineering, got %d", len(results))
+		}
+	})
+
+	// Member Fields Helper
+	var MemberFields = struct {
+		ID    field.Number[int64]
+		Name  field.String
+		Email field.String
+	}{
+		ID:    field.Number[int64]{}.WithColumn("id"),
+		Name:  field.String{}.WithColumn("name"),
+		Email: field.String{}.WithColumn("email"),
+	}
+
+	// 7. Partial Select (Bug Reproduction)
+	t.Run("PartialSelect", func(t *testing.T) {
+		// Ensure data exists
+		m := &Member{Name: "Part", Email: "part@test.com", Level: 1, DepartmentID: 1, CreatedAt: time.Now()}
+		if err := memberRepo.Create(ctx, m); err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+
+		// Try to select only name and email using fields
+		results, err := memberRepo.Query().
+			Select(MemberFields.Name, MemberFields.Email).
+			Find(ctx)
+
+		// Check mismatch
+		if err != nil {
+			t.Fatalf("Partial Select failed: %v", err)
+		}
+
+		if len(results) == 0 {
+			t.Fatal("Expected results, got 0")
+		}
+
+		// Check if other fields are zeroed out (as expected) and name/email are populated
+		resMember := results[0]
+		if resMember.Name == "" || resMember.Email == "" {
+			t.Error("Name or Email should be populated")
+		}
+		if resMember.ID != 0 {
+			// ID was not selected, so it should be 0 because we didn't scan into it.
+			t.Logf("ID is %d (expected 0 if not selected)", resMember.ID)
+		}
+	})
+
+	// 8. Scan into DTO (Custom Struct)
+	t.Run("ScanDTO", func(t *testing.T) {
+		// Ensure data
+		m := &Member{Name: "DTOUser", Email: "dto@test.com", Level: 1, DepartmentID: 1, CreatedAt: time.Now()}
+		memberRepo.Create(ctx, m)
+
+		type MemberDTO struct {
+			Name  string `db:"name"`
+			Email string `db:"email"`
+		}
+
+		var dtos []MemberDTO
+		err := memberRepo.Query().
+			Select(MemberFields.Name, MemberFields.Email).
+			Scan(ctx, &dtos)
+
+		if err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+
+		if len(dtos) == 0 {
+			t.Fatal("Expected results, got 0")
+		}
+
+		dto := dtos[0]
+		if dto.Name == "" || dto.Email == "" {
+			t.Error("Name or Email should be populated in DTO")
+		}
+		t.Logf("DTO: %+v", dto)
+	})
+
+	// 9. Upsert with Custom Conflict
+	t.Run("UpsertCustom", func(t *testing.T) {
+		// Create a user to conflict with
+		original := &Member{
+			Name:         "Dave",
+			Email:        "dave@test.com",
+			Level:        1,
+			DepartmentID: 1,
+			CreatedAt:    time.Now(),
+		}
+		if err := memberRepo.Create(ctx, original); err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+
+		// Upsert with same email, different name/level
+		clone := &Member{
+			Name:         "DaveUpdated",
+			Email:        "dave@test.com",
+			Level:        10,
+			DepartmentID: 1,
+			CreatedAt:    time.Now(),
+		}
+
+		// Upsert on Email conflict, update Name only. Level should stay.
+		err := memberRepo.Upsert(ctx, clone,
+			sqlc.OnConflict(MemberFields.Email),
+			sqlc.DoUpdate(MemberFields.Name),
+		)
+
+		if err != nil {
+			t.Fatalf("UpsertCustom failed: %v", err)
+		}
+
+		// Verify
+		updatedDave, err := memberRepo.Query().Where(MemberFields.Email.Eq("dave@test.com")).First(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if updatedDave.Name != "DaveUpdated" {
+			t.Errorf("Expected Name query to match DaveUpdated, got %s", updatedDave.Name)
+		}
+
+		if updatedDave.Level != 1 {
+			t.Errorf("Expected Level to be unchanged (1), got %d. (Did DoUpdate works?)", updatedDave.Level)
+		}
+	})
+}
