@@ -55,12 +55,12 @@ func (b Bool) IsFalse() clause.Expression {
 
 // IsNull creates a NULL check expression (field IS NULL).
 func (b Bool) IsNull() clause.Expression {
-	return clause.Expr{SQL: b.column.ColumnName() + " IS NULL", Vars: nil}
+	return clause.IsNull{Column: b.column}
 }
 
 // IsNotNull creates a NOT NULL check expression (field IS NOT NULL).
 func (b Bool) IsNotNull() clause.Expression {
-	return clause.Expr{SQL: b.column.ColumnName() + " IS NOT NULL", Vars: nil}
+	return clause.IsNotNull{Column: b.column}
 }
 
 // Set functions for UPDATE operations

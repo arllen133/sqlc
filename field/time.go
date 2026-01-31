@@ -74,12 +74,12 @@ func (t Time) Between(v1, v2 time.Time) clause.Expression {
 
 // IsNull creates a NULL check expression (field IS NULL).
 func (t Time) IsNull() clause.Expression {
-	return clause.Expr{SQL: t.column.ColumnName() + " IS NULL", Vars: nil}
+	return clause.IsNull{Column: t.column}
 }
 
 // IsNotNull creates a NOT NULL check expression (field IS NOT NULL).
 func (t Time) IsNotNull() clause.Expression {
-	return clause.Expr{SQL: t.column.ColumnName() + " IS NOT NULL", Vars: nil}
+	return clause.IsNotNull{Column: t.column}
 }
 
 // Set functions for UPDATE operations

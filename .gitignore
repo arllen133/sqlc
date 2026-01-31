@@ -7,7 +7,6 @@
 *.dll
 *.so
 *.dylib
-sqlcli
 orm-gen
 complete_demo
 

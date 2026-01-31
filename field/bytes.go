@@ -47,12 +47,12 @@ func (b Bytes) Neq(value []byte) clause.Expression {
 
 // IsNull creates a NULL check expression (field IS NULL).
 func (b Bytes) IsNull() clause.Expression {
-	return clause.Expr{SQL: b.column.ColumnName() + " IS NULL", Vars: nil}
+	return clause.IsNull{Column: b.column}
 }
 
 // IsNotNull creates a NOT NULL check expression (field IS NOT NULL).
 func (b Bytes) IsNotNull() clause.Expression {
-	return clause.Expr{SQL: b.column.ColumnName() + " IS NOT NULL", Vars: nil}
+	return clause.IsNotNull{Column: b.column}
 }
 
 // Set functions for UPDATE operations
