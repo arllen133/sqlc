@@ -117,7 +117,7 @@ func TestOrderBy(t *testing.T) {
 	col := clause.Column{Name: "created_at"}
 	tests := []struct {
 		name string
-		expr interface{ Build() string }
+		expr interface{ Build() (string, []any) }
 		want string
 	}{
 		{
@@ -134,7 +134,7 @@ func TestOrderBy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.expr.Build(); got != tt.want {
+			if got, _ := tt.expr.Build(); got != tt.want {
 				t.Errorf("want %q, got %q", tt.want, got)
 			}
 		})

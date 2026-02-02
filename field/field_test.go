@@ -157,14 +157,14 @@ func TestOrderBy(t *testing.T) {
 
 	// Test Asc
 	orderAsc := createdAt.Asc()
-	if orderAsc.Build() != "created_at" {
-		t.Errorf("Expected 'created_at', got '%s'", orderAsc.Build())
+	if sql, _ := orderAsc.Build(); sql != "created_at" {
+		t.Errorf("Expected 'created_at', got '%s'", sql)
 	}
 
 	// Test Desc
 	orderDesc := createdAt.Desc()
-	if orderDesc.Build() != "created_at DESC" {
-		t.Errorf("Expected 'created_at DESC', got '%s'", orderDesc.Build())
+	if sql, _ := orderDesc.Build(); sql != "created_at DESC" {
+		t.Errorf("Expected 'created_at DESC', got '%s'", sql)
 	}
 }
 

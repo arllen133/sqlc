@@ -237,10 +237,10 @@ type OrderByColumn struct {
 	Desc   bool
 }
 
-func (o OrderByColumn) Build() string {
+func (o OrderByColumn) Build() (string, []any) {
 	sql := o.Column.ColumnName()
 	if o.Desc {
 		sql += " DESC"
 	}
-	return sql
+	return sql, nil
 }

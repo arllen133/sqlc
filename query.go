@@ -38,13 +38,10 @@ func (q *QueryBuilder[T]) Where(expr clause.Expression) *QueryBuilder[T] {
 	return q
 }
 
-type OrderBuilder interface {
-	Build() string
-}
-
-func (q *QueryBuilder[T]) OrderBy(orders ...OrderBuilder) *QueryBuilder[T] {
+func (q *QueryBuilder[T]) OrderBy(orders ...clause.OrderByColumn) *QueryBuilder[T] {
 	for _, order := range orders {
-		q.builder = q.builder.OrderBy(order.Build())
+		sql, _ := order.Build()
+		q.builder = q.builder.OrderBy(sql)
 	}
 	return q
 }
