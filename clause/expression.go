@@ -16,6 +16,8 @@ type Column struct {
 	Name  string
 }
 
+func (c Column) Column() Column { return c }
+
 // ColumnName returns the full column name (with table prefix if specified)
 func (c Column) ColumnName() string {
 	if c.Table != "" {
@@ -136,17 +138,20 @@ type IN struct {
 }
 
 func (i IN) Build() (string, []any) {
-	if len(i.Values) == 0 {
+	switch len(i.Values) {
+	case 0:
 		return "1 = 0", nil // IN with empty list is always false
-	}
+	case 1:
+		return i.Column.ColumnName() + " = ?", []any{i.Values[0]}
+	default:
+		placeholders := make([]string, len(i.Values))
+		for idx := range i.Values {
+			placeholders[idx] = "?"
+		}
 
-	placeholders := make([]string, len(i.Values))
-	for idx := range i.Values {
-		placeholders[idx] = "?"
+		sql := fmt.Sprintf("%s IN (%s)", i.Column.ColumnName(), strings.Join(placeholders, ", "))
+		return sql, i.Values
 	}
-
-	sql := fmt.Sprintf("%s IN (%s)", i.Column.ColumnName(), strings.Join(placeholders, ", "))
-	return sql, i.Values
 }
 
 // Between represents a BETWEEN expression
@@ -243,4 +248,46 @@ func (o OrderByColumn) Build() (string, []any) {
 		sql += " DESC"
 	}
 	return sql, nil
+}
+
+// InExpr represents column IN (expression) - typically used for subqueries
+type InExpr struct {
+	Column Column
+	Expr   Expression
+}
+
+func (i InExpr) Build() (string, []any) {
+	sql, args := i.Expr.Build()
+	return fmt.Sprintf("%s IN %s", i.Column.ColumnName(), sql), args
+}
+
+// NotInExpr represents column NOT IN (expression) - typically used for subqueries
+type NotInExpr struct {
+	Column Column
+	Expr   Expression
+}
+
+func (n NotInExpr) Build() (string, []any) {
+	sql, args := n.Expr.Build()
+	return fmt.Sprintf("%s NOT IN %s", n.Column.ColumnName(), sql), args
+}
+
+// ExistsExpr represents EXISTS (expression)
+type ExistsExpr struct {
+	Expr Expression
+}
+
+func (e ExistsExpr) Build() (string, []any) {
+	sql, args := e.Expr.Build()
+	return "EXISTS " + sql, args
+}
+
+// NotExistsExpr represents NOT EXISTS (expression)
+type NotExistsExpr struct {
+	Expr Expression
+}
+
+func (n NotExistsExpr) Build() (string, []any) {
+	sql, args := n.Expr.Build()
+	return "NOT EXISTS " + sql, args
 }

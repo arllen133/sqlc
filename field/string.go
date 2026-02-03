@@ -99,3 +99,13 @@ func (s String) Asc() clause.OrderByColumn {
 func (s String) Desc() clause.OrderByColumn {
 	return clause.OrderByColumn{Column: s.column, Desc: true}
 }
+
+// InExpr creates an IN expression with a subquery (field IN (SELECT ...)).
+func (s String) InExpr(expr clause.Expression) clause.Expression {
+	return clause.InExpr{Column: s.column, Expr: expr}
+}
+
+// NotInExpr creates a NOT IN expression with a subquery (field NOT IN (SELECT ...)).
+func (s String) NotInExpr(expr clause.Expression) clause.Expression {
+	return clause.NotInExpr{Column: s.column, Expr: expr}
+}

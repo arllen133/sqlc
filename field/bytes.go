@@ -61,3 +61,13 @@ func (b Bytes) IsNotNull() clause.Expression {
 func (b Bytes) Set(val []byte) clause.Assignment {
 	return clause.Assignment{Column: b.column, Value: val}
 }
+
+// InExpr creates an IN expression with a subquery (field IN (SELECT ...)).
+func (b Bytes) InExpr(expr clause.Expression) clause.Expression {
+	return clause.InExpr{Column: b.column, Expr: expr}
+}
+
+// NotInExpr creates a NOT IN expression with a subquery (field NOT IN (SELECT ...)).
+func (b Bytes) NotInExpr(expr clause.Expression) clause.Expression {
+	return clause.NotInExpr{Column: b.column, Expr: expr}
+}

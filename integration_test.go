@@ -21,9 +21,20 @@ type Department struct {
 	Name      string    `db:"name"`
 	Location  string    `db:"location"`
 	CreatedAt time.Time `db:"created_at"`
+
+	// Relation fields (not in DB, loaded via Preload)
+	Members []*Member `db:"-"`
 }
 
 func (Department) TableName() string { return "departments" }
+
+// DepartmentHasMembers defines the HasMany relation: Department -> Members
+var DepartmentHasMembers = sqlc.HasMany[Department, Member](
+	clause.Column{Name: "department_id"},                           // Foreign key on Member
+	clause.Column{Name: "id"},                                      // Local key on Department
+	func(d *Department, members []*Member) { d.Members = members }, // Setter
+	func(d *Department) any { return d.ID },                        // Get local key
+)
 
 // Member Model (Advanced User)
 type Member struct {
@@ -226,7 +237,7 @@ func TestAdvancedIntegration(t *testing.T) {
 				clause.Column{Name: "members.department_id"},
 				clause.Column{Name: "members.created_at"},
 			).
-			Join("departments", clause.Expr{SQL: "members.department_id = departments.id"}).
+			JoinTable("departments", clause.Expr{SQL: "members.department_id = departments.id"}).
 			Where(clause.Expr{SQL: "departments.name = ?", Vars: []any{"Engineering"}}).
 			Find(ctx)
 
@@ -484,6 +495,44 @@ func TestAdvancedIntegration(t *testing.T) {
 
 		if updatedDave.Level != 1 {
 			t.Errorf("Expected Level to be unchanged (1), got %d. (Did DoUpdate works?)", updatedDave.Level)
+		}
+	})
+
+	// 10. HasMany Preload
+	t.Run("HasManyPreload", func(t *testing.T) {
+		// Query departments with preloaded members
+		depts, err := deptRepo.Query().
+			WithPreload(sqlc.Preload(DepartmentHasMembers)).
+			Find(ctx)
+
+		if err != nil {
+			t.Fatalf("Query with preload failed: %v", err)
+		}
+
+		if len(depts) < 2 {
+			t.Fatalf("Expected at least 2 departments, got %d", len(depts))
+		}
+
+		// Find Engineering dept and verify it has members loaded
+		var engineering *Department
+		for _, d := range depts {
+			if d.Name == "Engineering" {
+				engineering = d
+				break
+			}
+		}
+
+		if engineering == nil {
+			t.Fatal("Engineering department not found")
+		}
+
+		if len(engineering.Members) == 0 {
+			t.Error("Expected Engineering to have preloaded members, got 0")
+		}
+
+		t.Logf("Engineering has %d members (preloaded)", len(engineering.Members))
+		for _, m := range engineering.Members {
+			t.Logf("  - %s (%s)", m.Name, m.Email)
 		}
 	})
 }

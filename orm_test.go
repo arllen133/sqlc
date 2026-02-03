@@ -3,10 +3,10 @@ package sqlc_test
 import (
 	"context"
 	"database/sql"
+	"os"
+	"strings"
 	"testing"
 	"time"
-
-	"os"
 
 	"github.com/arllen133/sqlc"
 	"github.com/arllen133/sqlc/clause"
@@ -48,6 +48,17 @@ func setupTestDB(t *testing.T) (*sql.DB, *sqlc.Session) {
 			email TEXT,
 			created_at DATETIME
 		)`)
+		if err == nil {
+			_, err = db.Exec(`CREATE TABLE IF NOT EXISTS posts (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				user_id INTEGER,
+				title TEXT,
+				content TEXT,
+				metadata TEXT,
+				created_at DATETIME,
+				updated_at DATETIME
+			)`)
+		}
 	case "mysql":
 		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS users (
 			id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -55,8 +66,20 @@ func setupTestDB(t *testing.T) (*sql.DB, *sqlc.Session) {
 			email VARCHAR(255),
 			created_at DATETIME
 		)`)
+		if err == nil {
+			_, err = db.Exec(`CREATE TABLE IF NOT EXISTS posts (
+				id BIGINT PRIMARY KEY AUTO_INCREMENT,
+				user_id BIGINT,
+				title VARCHAR(200),
+				content TEXT,
+				metadata JSON,
+				created_at DATETIME,
+				updated_at DATETIME
+			)`)
+		}
 		// Truncate to ensure clean state for MySQL/PG which persist
 		db.Exec("TRUNCATE TABLE users")
+		db.Exec("TRUNCATE TABLE posts")
 	case "postgres":
 		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS users (
 			id SERIAL PRIMARY KEY,
@@ -64,7 +87,19 @@ func setupTestDB(t *testing.T) (*sql.DB, *sqlc.Session) {
 			email TEXT,
 			created_at TIMESTAMP
 		)`)
+		if err == nil {
+			_, err = db.Exec(`CREATE TABLE IF NOT EXISTS posts (
+				id SERIAL PRIMARY KEY,
+				user_id BIGINT,
+				title TEXT,
+				content TEXT,
+				metadata JSONB,
+				created_at TIMESTAMP,
+				updated_at TIMESTAMP
+			)`)
+		}
 		db.Exec("TRUNCATE TABLE users RESTART IDENTITY")
+		db.Exec("TRUNCATE TABLE posts RESTART IDENTITY")
 	}
 
 	if err != nil {
@@ -146,6 +181,7 @@ func TestQueryBuilder(t *testing.T) {
 	defer db.Close()
 
 	userRepo := sqlc.NewRepository[models.User](session)
+	postRepo := sqlc.NewRepository[models.Post](session)
 	ctx := context.Background()
 
 	// Create test data
@@ -158,6 +194,15 @@ func TestQueryBuilder(t *testing.T) {
 	for _, u := range users {
 		_ = userRepo.Create(ctx, u)
 	}
+
+	_ = postRepo.Create(ctx, &models.Post{
+		UserID:    users[0].ID,
+		Title:     "hello",
+		Content:   "world",
+		Metadata:  sqlc.NewJSON(models.PostMetadata{}),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
 
 	t.Run("Count", func(t *testing.T) {
 		count, err := userRepo.Query().Count(ctx)
@@ -192,6 +237,32 @@ func TestQueryBuilder(t *testing.T) {
 		}
 	})
 
+	t.Run("Take", func(t *testing.T) {
+		user, err := userRepo.Query().Take(ctx)
+		if err != nil {
+			t.Fatalf("Take failed: %v", err)
+		}
+		if user == nil {
+			t.Error("Expected user to be non-nil")
+		}
+	})
+
+	t.Run("Last", func(t *testing.T) {
+		var maxID int64
+		for _, u := range users {
+			if u.ID > maxID {
+				maxID = u.ID
+			}
+		}
+		user, err := userRepo.Query().Last(ctx)
+		if err != nil {
+			t.Fatalf("Last failed: %v", err)
+		}
+		if user.ID != maxID {
+			t.Fatalf("Expected last ID %d, got %d", maxID, user.ID)
+		}
+	})
+
 	t.Run("Limit", func(t *testing.T) {
 		results, err := userRepo.Query().Limit(2).Find(ctx)
 		if err != nil {
@@ -215,10 +286,8 @@ func TestQueryBuilder(t *testing.T) {
 	})
 
 	t.Run("SelectCumulative", func(t *testing.T) {
-		// First Select should replace default columns
-		// Second Select should append
-		q := userRepo.Query().Select(clause.Column{Name: "username"})
-		q.Select(clause.Column{Name: "email"})
+		// Select replaces columns (not cumulative), so select both in one call
+		q := userRepo.Query().Select(clause.Column{Name: "username"}, clause.Column{Name: "email"})
 
 		// We can't easily inspect columns on private struct, but we can execute query
 		// If both selected, we can access them. If not selected, they might be empty string/zero?
@@ -243,13 +312,403 @@ func TestQueryBuilder(t *testing.T) {
 			// CreatedAt was NOT selected, so it should be zero (time.Time zero value)
 			// UNLESS schema.SelectColumns() was used which includes created_at.
 			// Default columns includes ALL.
-			// Our cumulative select should have REPLACED default with [username].
-			// Then appended [email].
-			// So [username, email].
+			// Our Select replaced default with [username, email].
 			// created_at should be excluded.
 			t.Error("Expected CreatedAt to be zero (not selected)")
 		}
 	})
+
+	t.Run("Join", func(t *testing.T) {
+		results, err := postRepo.Query().
+			Join(&generated.User,
+				sqlc.On(generated.Post.UserID, generated.User.ID),
+			).
+			Find(ctx)
+		if err != nil {
+			t.Fatalf("Join failed: %v", err)
+		}
+		if len(results) != 1 {
+			t.Fatalf("Expected 1 post, got %d", len(results))
+		}
+	})
+
+	t.Run("JoinWithWhere", func(t *testing.T) {
+		results, err := postRepo.Query().
+			Join(&generated.User,
+				sqlc.On(generated.Post.UserID, generated.User.ID),
+			).
+			Where(generated.Post.Title.Eq("hello")).
+			Where(generated.User.Username.Eq("alice")).
+			Find(ctx)
+		if err != nil {
+			t.Fatalf("JoinWithWhere failed: %v", err)
+		}
+		if len(results) != 1 {
+			t.Fatalf("Expected 1 post, got %d", len(results))
+		}
+	})
+}
+
+func TestSQLGeneration(t *testing.T) {
+	_, session := setupTestDB(t)
+
+	userRepo := sqlc.NewRepository[models.User](session)
+	postRepo := sqlc.NewRepository[models.Post](session)
+
+	tests := []struct {
+		name         string
+		buildQuery   func() (string, []any, error)
+		wantSQL      string
+		wantArgs     []any
+		wantContains []string // for partial matching when full SQL varies
+	}{
+		{
+			name: "SimpleSelect",
+			buildQuery: func() (string, []any, error) {
+				return userRepo.Query().ToSQL()
+			},
+			wantSQL:  "SELECT id, username, email, created_at FROM users",
+			wantArgs: []any{},
+		},
+		{
+			name: "WhereEq",
+			buildQuery: func() (string, []any, error) {
+				return userRepo.Query().
+					Where(generated.User.Username.Eq("alice")).
+					ToSQL()
+			},
+			wantSQL:  "SELECT id, username, email, created_at FROM users WHERE username = ?",
+			wantArgs: []any{"alice"},
+		},
+		{
+			name: "WhereLike",
+			buildQuery: func() (string, []any, error) {
+				return userRepo.Query().
+					Where(generated.User.Email.Like("%@example.com")).
+					ToSQL()
+			},
+			wantSQL:  "SELECT id, username, email, created_at FROM users WHERE email LIKE ?",
+			wantArgs: []any{"%@example.com"},
+		},
+		{
+			name: "WhereIn",
+			buildQuery: func() (string, []any, error) {
+				return userRepo.Query().
+					Where(generated.User.ID.In(1, 2, 3)).
+					ToSQL()
+			},
+			wantSQL:  "SELECT id, username, email, created_at FROM users WHERE id IN (?, ?, ?)",
+			wantArgs: []any{int64(1), int64(2), int64(3)},
+		},
+		{
+			name: "WhereBetween",
+			buildQuery: func() (string, []any, error) {
+				return userRepo.Query().
+					Where(generated.User.ID.Between(1, 10)).
+					ToSQL()
+			},
+			wantSQL:  "SELECT id, username, email, created_at FROM users WHERE id BETWEEN ? AND ?",
+			wantArgs: []any{int64(1), int64(10)},
+		},
+		{
+			name: "WhereGtLt",
+			buildQuery: func() (string, []any, error) {
+				return userRepo.Query().
+					Where(generated.User.ID.Gt(5)).
+					Where(generated.User.ID.Lt(10)).
+					ToSQL()
+			},
+			wantSQL:  "SELECT id, username, email, created_at FROM users WHERE id > ? AND id < ?",
+			wantArgs: []any{int64(5), int64(10)},
+		},
+		{
+			name: "LimitOffset",
+			buildQuery: func() (string, []any, error) {
+				return userRepo.Query().
+					Limit(10).
+					Offset(20).
+					ToSQL()
+			},
+			wantSQL:  "SELECT id, username, email, created_at FROM users LIMIT 10 OFFSET 20",
+			wantArgs: []any{},
+		},
+		{
+			name: "OrderBy",
+			buildQuery: func() (string, []any, error) {
+				return userRepo.Query().
+					OrderBy(generated.User.ID.Desc()).
+					ToSQL()
+			},
+			wantSQL:  "SELECT id, username, email, created_at FROM users ORDER BY id DESC",
+			wantArgs: []any{},
+		},
+		{
+			name: "OrderByMultiple",
+			buildQuery: func() (string, []any, error) {
+				return userRepo.Query().
+					OrderBy(generated.User.Username.Asc(), generated.User.ID.Desc()).
+					ToSQL()
+			},
+			wantSQL:  "SELECT id, username, email, created_at FROM users ORDER BY username, id DESC",
+			wantArgs: []any{},
+		},
+		{
+			name: "InnerJoin",
+			buildQuery: func() (string, []any, error) {
+				return postRepo.Query().
+					Join(&generated.User,
+						sqlc.On(generated.Post.UserID, generated.User.ID),
+					).
+					ToSQL()
+			},
+			wantContains: []string{
+				"SELECT posts.id, posts.user_id, posts.title, posts.content, posts.metadata, posts.created_at, posts.updated_at FROM posts",
+				"JOIN users ON posts.user_id = users.id",
+			},
+		},
+		{
+			name: "LeftJoin",
+			buildQuery: func() (string, []any, error) {
+				return postRepo.Query().
+					LeftJoin(&generated.User,
+						sqlc.On(generated.Post.UserID, generated.User.ID),
+					).
+					ToSQL()
+			},
+			wantContains: []string{
+				"FROM posts",
+				"LEFT JOIN users ON posts.user_id = users.id",
+			},
+		},
+		{
+			name: "JoinWithWhere",
+			buildQuery: func() (string, []any, error) {
+				return postRepo.Query().
+					Join(&generated.User,
+						sqlc.On(generated.Post.UserID, generated.User.ID),
+					).
+					Where(generated.Post.Title.Eq("hello")).
+					Where(generated.User.Username.Eq("alice")).
+					ToSQL()
+			},
+			wantContains: []string{
+				"FROM posts",
+				"JOIN users ON posts.user_id = users.id",
+				"WHERE title = ?",
+				"AND username = ?",
+			},
+			wantArgs: []any{"hello", "alice"},
+		},
+		{
+			name: "SelectSpecificColumns",
+			buildQuery: func() (string, []any, error) {
+				return userRepo.Query().
+					Select(generated.User.ID, generated.User.Username).
+					ToSQL()
+			},
+			wantSQL:  "SELECT id, username FROM users",
+			wantArgs: []any{},
+		},
+		{
+			name: "ComplexQuery",
+			buildQuery: func() (string, []any, error) {
+				return userRepo.Query().
+					Where(generated.User.Username.Like("a%")).
+					Where(generated.User.ID.Gt(0)).
+					OrderBy(generated.User.Username.Asc()).
+					Limit(5).
+					Offset(10).
+					ToSQL()
+			},
+			wantContains: []string{
+				"SELECT id, username, email, created_at FROM users",
+				"WHERE username LIKE ?",
+				"AND id > ?",
+				"ORDER BY username",
+				"LIMIT 5",
+				"OFFSET 10",
+			},
+			wantArgs: []any{"a%", int64(0)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotSQL, gotArgs, err := tt.buildQuery()
+			if err != nil {
+				t.Fatalf("ToSQL() error = %v", err)
+			}
+
+			// Full SQL match
+			if tt.wantSQL != "" {
+				if gotSQL != tt.wantSQL {
+					t.Errorf("SQL mismatch:\ngot:  %s\nwant: %s", gotSQL, tt.wantSQL)
+				}
+			}
+
+			// Partial matching for complex queries
+			for _, substr := range tt.wantContains {
+				if !contains(gotSQL, substr) {
+					t.Errorf("SQL should contain %q\ngot: %s", substr, gotSQL)
+				}
+			}
+
+			// Args matching
+			if tt.wantArgs != nil {
+				if len(gotArgs) != len(tt.wantArgs) {
+					t.Errorf("Args length mismatch: got %d, want %d\ngot:  %v\nwant: %v", len(gotArgs), len(tt.wantArgs), gotArgs, tt.wantArgs)
+				} else {
+					for i := range tt.wantArgs {
+						if gotArgs[i] != tt.wantArgs[i] {
+							t.Errorf("Arg[%d] mismatch: got %v (%T), want %v (%T)", i, gotArgs[i], gotArgs[i], tt.wantArgs[i], tt.wantArgs[i])
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// contains checks if s contains substr (case-insensitive for SQL)
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
+}
+
+func TestSubquerySQLGeneration(t *testing.T) {
+	_, session := setupTestDB(t)
+
+	userRepo := sqlc.NewRepository[models.User](session)
+	postRepo := sqlc.NewRepository[models.Post](session)
+
+	tests := []struct {
+		name         string
+		buildQuery   func() (string, []any, error)
+		wantContains []string
+		wantArgs     []any
+	}{
+		{
+			name: "InExpr_Subquery",
+			buildQuery: func() (string, []any, error) {
+				// SELECT * FROM posts WHERE user_id IN (SELECT id FROM users WHERE username = 'alice')
+				subquery := userRepo.Query().
+					Select(generated.User.ID).
+					Where(generated.User.Username.Eq("alice"))
+
+				return postRepo.Query().
+					Where(generated.Post.UserID.InExpr(subquery)).
+					ToSQL()
+			},
+			wantContains: []string{
+				"FROM posts",
+				"user_id IN (SELECT id FROM users WHERE username = ?)",
+			},
+			wantArgs: []any{"alice"},
+		},
+		{
+			name: "NotInExpr_Subquery",
+			buildQuery: func() (string, []any, error) {
+				// SELECT * FROM posts WHERE user_id NOT IN (SELECT id FROM users WHERE username = 'bob')
+				subquery := userRepo.Query().
+					Select(generated.User.ID).
+					Where(generated.User.Username.Eq("bob"))
+
+				return postRepo.Query().
+					Where(generated.Post.UserID.NotInExpr(subquery)).
+					ToSQL()
+			},
+			wantContains: []string{
+				"FROM posts",
+				"user_id NOT IN (SELECT id FROM users WHERE username = ?)",
+			},
+			wantArgs: []any{"bob"},
+		},
+		{
+			name: "Exists_Subquery",
+			buildQuery: func() (string, []any, error) {
+				// SELECT * FROM users WHERE EXISTS (SELECT 1 FROM posts WHERE user_id > 0)
+				subquery := postRepo.Query().
+					Select(clause.Column{Name: "1"}).
+					Where(generated.Post.UserID.Gt(0))
+
+				return userRepo.Query().
+					Where(sqlc.Exists(subquery)).
+					ToSQL()
+			},
+			wantContains: []string{
+				"FROM users",
+				"EXISTS (SELECT 1 FROM posts WHERE user_id > ?)",
+			},
+			wantArgs: []any{int64(0)},
+		},
+		{
+			name: "NotExists_Subquery",
+			buildQuery: func() (string, []any, error) {
+				// SELECT * FROM users WHERE NOT EXISTS (SELECT 1 FROM posts WHERE user_id = 999)
+				subquery := postRepo.Query().
+					Select(clause.Column{Name: "1"}).
+					Where(generated.Post.UserID.Eq(999))
+
+				return userRepo.Query().
+					Where(sqlc.NotExists(subquery)).
+					ToSQL()
+			},
+			wantContains: []string{
+				"FROM users",
+				"NOT EXISTS (SELECT 1 FROM posts WHERE user_id = ?)",
+			},
+			wantArgs: []any{int64(999)},
+		},
+		{
+			name: "NestedSubquery_Complex",
+			buildQuery: func() (string, []any, error) {
+				// Complex: SELECT * FROM posts WHERE user_id IN (SELECT id FROM users WHERE id > 0 AND username LIKE 'a%')
+				subquery := userRepo.Query().
+					Select(generated.User.ID).
+					Where(generated.User.ID.Gt(0)).
+					Where(generated.User.Username.Like("a%"))
+
+				return postRepo.Query().
+					Where(generated.Post.UserID.InExpr(subquery)).
+					Limit(10).
+					ToSQL()
+			},
+			wantContains: []string{
+				"FROM posts",
+				"user_id IN (SELECT id FROM users WHERE id > ? AND username LIKE ?)",
+				"LIMIT 10",
+			},
+			wantArgs: []any{int64(0), "a%"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotSQL, gotArgs, err := tt.buildQuery()
+			if err != nil {
+				t.Fatalf("ToSQL() error = %v", err)
+			}
+
+			// Partial matching for subquery SQL
+			for _, substr := range tt.wantContains {
+				if !contains(gotSQL, substr) {
+					t.Errorf("SQL should contain %q\ngot: %s", substr, gotSQL)
+				}
+			}
+
+			// Args matching
+			if tt.wantArgs != nil {
+				if len(gotArgs) != len(tt.wantArgs) {
+					t.Errorf("Args length mismatch: got %d, want %d\ngot:  %v\nwant: %v", len(gotArgs), len(tt.wantArgs), gotArgs, tt.wantArgs)
+				} else {
+					for i := range tt.wantArgs {
+						if gotArgs[i] != tt.wantArgs[i] {
+							t.Errorf("Arg[%d] mismatch: got %v (%T), want %v (%T)", i, gotArgs[i], gotArgs[i], tt.wantArgs[i], tt.wantArgs[i])
+						}
+					}
+				}
+			}
+		})
+	}
 }
 
 func TestFieldExpressions(t *testing.T) {
@@ -358,7 +817,6 @@ func TestTransactions(t *testing.T) {
 
 			return nil
 		})
-
 		if err != nil {
 			t.Fatalf("Transaction failed: %v", err)
 		}

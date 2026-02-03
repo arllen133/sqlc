@@ -200,6 +200,56 @@ repo.UpdateColumns(ctx, id,
 )
 ```
 
+### Relations & Eager Loading
+
+Support for defining and eagerly loading relationships (HasOne, HasMany, BelongsTo) to avoid N+1 query problems.
+
+#### Define Relations
+
+Use the `relation` tag on your struct fields. These fields are typically not stored in the database column matching the field name, so use `db:"-"`.
+
+```go
+type User struct {
+    ID    int64   `db:"id,primaryKey,autoIncrement"`
+    Posts []*Post `db:"-" relation:"hasMany,foreignKey:user_id"`
+}
+
+type Post struct {
+    ID     int64 `db:"id,primaryKey"`
+    UserID int64 `db:"user_id"`
+    // BelongsTo: FK (user_id) is on the Post struct
+    Author *User `db:"-" relation:"belongsTo,foreignKey:user_id"`
+}
+```
+
+#### Generate Code
+
+Running `sqlcli` will automatically generate relation metadata in your `*_gen.go` files, e.g., `generated.User_Posts`.
+
+```bash
+sqlcli -i ./models
+```
+
+#### Eager Loading (Preload)
+
+Use `WithPreload` to load relationships efficiently (usually via logical IN queries).
+
+```go
+// Load Users with their Posts
+users, _ := userRepo.Query().
+    WithPreload(sqlc.Preload(generated.User_Posts)).
+    Find(ctx)
+
+for _, u := range users {
+    fmt.Printf("User %d has %d posts\n", u.ID, len(u.Posts))
+}
+
+// Load Posts with their Author
+posts, _ := postRepo.Query().
+    WithPreload(sqlc.Preload(generated.Post_Author)).
+    Find(ctx)
+```
+
 ### Observability
 
 #### Logging

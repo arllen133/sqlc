@@ -118,3 +118,13 @@ func (n Number[T]) Asc() clause.OrderByColumn {
 func (n Number[T]) Desc() clause.OrderByColumn {
 	return clause.OrderByColumn{Column: n.column, Desc: true}
 }
+
+// InExpr creates an IN expression with a subquery (field IN (SELECT ...)).
+func (n Number[T]) InExpr(expr clause.Expression) clause.Expression {
+	return clause.InExpr{Column: n.column, Expr: expr}
+}
+
+// NotInExpr creates a NOT IN expression with a subquery (field NOT IN (SELECT ...)).
+func (n Number[T]) NotInExpr(expr clause.Expression) clause.Expression {
+	return clause.NotInExpr{Column: n.column, Expr: expr}
+}

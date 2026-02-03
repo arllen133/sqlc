@@ -10,6 +10,9 @@ type User struct {
 	Username  string    `db:"username,size:100,unique"`
 	Email     string    `db:"email,size:255,index"`
 	CreatedAt time.Time `db:"created_at"`
+
+	// Relation fields (not in DB, loaded via Preload)
+	Posts []*Post `db:"-" relation:"hasMany,foreignKey:user_id"`
 }
 
 func (User) TableName() string {

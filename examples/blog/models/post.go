@@ -23,4 +23,7 @@ type Post struct {
 	Metadata  sqlc.JSON[PostMetadata] `db:"metadata,type:json"` // JSON field with type:json tag
 	CreatedAt time.Time               `db:"created_at"`
 	UpdatedAt time.Time               `db:"updated_at"`
+
+	// Relation: Post has one Author (User)
+	Author *User `db:"-" relation:"belongsTo,foreignKey:user_id"`
 }

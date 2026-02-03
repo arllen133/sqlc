@@ -174,6 +174,7 @@ type ModelMeta struct {
 	TableName         string
 	Fields            []FieldMeta
 	JSONFields        []JSONFieldMeta   // JSON field path definitions
+	Relations         []RelationMeta    // Relation definitions
 	Doc               []string          // Documentation comments
 	GeneratedAt       string            // Timestamp
 	HasJSON           bool              // Whether imported encoding/json package is needed
@@ -187,6 +188,17 @@ type ModelMeta struct {
 	HasDBTag          bool              // True if any field has a db tag
 	TypeAliases       map[string]string // type A int → {"A": "int"}
 	FieldTypeMap      map[string]string // User-defined type mappings from config
+}
+
+// RelationMeta holds information about a model relation
+type RelationMeta struct {
+	FieldName       string // Field name in parent model (e.g., "Posts")
+	RelType         string // Relation type: "hasOne", "hasMany", "belongsTo"
+	ForeignKey      string // Foreign key column (on child for hasOne/Many, on parent for belongsTo)
+	LocalKey        string // Local key column (on parent for hasOne/Many[default id], on child for belongsTo[default id])
+	TargetType      string // Target model type name (e.g., "Post")
+	TargetSlice     bool   // True if field is a slice (hasMany)
+	ForeignKeyField string // Go field name of foreign key (only for belongsTo)
 }
 
 type FieldMeta struct {
@@ -286,14 +298,26 @@ func ParseModels(dir string) ([]ModelMeta, error) {
 					}
 
 					fieldName := field.Names[0].Name
-					fieldType := fmt.Sprintf("%s", field.Type)
+					fieldType := exprToString(field.Type)
 
+					/* Handled by exprToString now
 					// Handle array types properly for string representation
 					if arr, ok := field.Type.(*ast.ArrayType); ok {
 						if ident, ok := arr.Elt.(*ast.Ident); ok {
 							fieldType = "[]" + ident.Name
+						} else if star, ok := arr.Elt.(*ast.StarExpr); ok {
+							// Handle []*Type
+							if ident, ok := star.X.(*ast.Ident); ok {
+								fieldType = "[]*" + ident.Name
+							} else if sel, ok := star.X.(*ast.SelectorExpr); ok {
+								// Handle []*pkg.Type
+								if x, ok := sel.X.(*ast.Ident); ok {
+									fieldType = "[]*" + x.Name + "." + sel.Sel.Name
+								}
+							}
 						}
 					}
+					*/
 					// Handle selector expressions (e.g. json.RawMessage)
 					if sel, ok := field.Type.(*ast.SelectorExpr); ok {
 						if x, ok := sel.X.(*ast.Ident); ok {
@@ -407,6 +431,21 @@ func ParseModels(dir string) ([]ModelMeta, error) {
 							}
 						}
 					}
+					// Skip fields with db:"-" (they are not in the database)
+					if meta.Column == "-" {
+						// Still parse relation tag for this field before skipping
+						if field.Tag != nil {
+							tag := reflect.StructTag(strings.Trim(field.Tag.Value, "`"))
+							relationTag := tag.Get("relation")
+							if relationTag != "" {
+								rel := parseRelationTag(fieldName, meta.Type, relationTag)
+								if rel != nil {
+									model.Relations = append(model.Relations, *rel)
+								}
+							}
+						}
+						continue
+					}
 					model.Fields = append(model.Fields, meta)
 
 					// Cache PK info if this is the PK
@@ -416,11 +455,36 @@ func ParseModels(dir string) ([]ModelMeta, error) {
 						model.PKFieldType = meta.Type
 						model.IsAutoIncrementPK = meta.AutoIncr
 					}
+
+					// Parse relation tag
+					if field.Tag != nil {
+						tag := reflect.StructTag(strings.Trim(field.Tag.Value, "`"))
+						relationTag := tag.Get("relation")
+						if relationTag != "" {
+							rel := parseRelationTag(fieldName, meta.Type, relationTag)
+							if rel != nil {
+								model.Relations = append(model.Relations, *rel)
+							}
+						}
+					}
 				}
 				// Mark as JSON-only if no db tags and no PK
 				if !model.HasDBTag && model.PKFieldName == "" {
 					model.IsJSONOnly = true
 				}
+
+				// Resolve ForeignKeyField for belongsTo relations
+				for i, rel := range model.Relations {
+					if rel.RelType == "belongsTo" {
+						for _, f := range model.Fields {
+							if f.Column == rel.ForeignKey {
+								model.Relations[i].ForeignKeyField = f.FieldName
+								break
+							}
+						}
+					}
+				}
+
 				models = append(models, model)
 				return true
 			})
@@ -522,4 +586,72 @@ func exprToString(expr ast.Expr) string {
 		return "map[" + exprToString(t.Key) + "]" + exprToString(t.Value)
 	}
 	return ""
+}
+
+// parseRelationTag parses a relation tag like "hasMany,foreignKey:user_id,localKey:id"
+func parseRelationTag(fieldName, fieldType, tag string) *RelationMeta {
+	rel := &RelationMeta{
+		FieldName: fieldName,
+		LocalKey:  "id", // Default local key
+	}
+
+	// Determine if it's a slice (hasMany)
+	rel.TargetSlice = strings.HasPrefix(fieldType, "[]") || strings.HasPrefix(fieldType, "[]*")
+
+	// Extract target type from field type
+	targetType := fieldType
+	targetType = strings.TrimPrefix(targetType, "[]")
+	targetType = strings.TrimPrefix(targetType, "[]*")
+	targetType = strings.TrimPrefix(targetType, "*")
+	// Remove package prefix if present
+	if lastDot := strings.LastIndex(targetType, "."); lastDot != -1 {
+		targetType = targetType[lastDot+1:]
+	}
+	rel.TargetType = targetType
+
+	// Parse tag parts
+	parts := strings.Split(tag, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		if strings.Contains(part, ":") {
+			kv := strings.SplitN(part, ":", 2)
+			key, val := strings.TrimSpace(kv[0]), strings.TrimSpace(kv[1])
+			switch key {
+			case "foreignKey":
+				rel.ForeignKey = val
+			case "localKey":
+				rel.LocalKey = val
+			}
+		} else {
+			// Relation type (hasOne, hasMany, belongsTo)
+			switch strings.ToLower(part) {
+			case "hasone":
+				rel.RelType = "hasOne"
+			case "hasmany":
+				rel.RelType = "hasMany"
+			case "belongsto":
+				rel.RelType = "belongsTo"
+			}
+		}
+	}
+
+	// Auto-detect relation type from field type if not specified
+	if rel.RelType == "" {
+		if rel.TargetSlice {
+			rel.RelType = "hasMany"
+		} else {
+			rel.RelType = "hasOne"
+		}
+	}
+
+	// Validate: must have foreignKey
+	if rel.ForeignKey == "" {
+		return nil
+	}
+
+	return rel
 }

@@ -43,7 +43,7 @@ func LoadSchema[T any]() Schema[T] {
 	if s, ok := schemas[typ]; ok {
 		return s.(Schema[T])
 	}
-	panic(fmt.Sprintf("orm: schema not registered for type %v", typ))
+	panic(fmt.Sprintf("sqlc: schema not registered for type %v", typ))
 }
 
 // ScanRows was removed as part of sqlx refactor

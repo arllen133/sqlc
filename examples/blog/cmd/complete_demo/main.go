@@ -26,6 +26,7 @@ func main() {
 
 	session := sqlc.NewSession(db, &sqlc.SQLiteDialect{})
 	userRepo := sqlc.NewRepository[models.User](session)
+	postRepo := sqlc.NewRepository[models.Post](session)
 	ctx := context.Background()
 
 	// Create test users
@@ -122,10 +123,63 @@ func main() {
 		fmt.Printf("   Total users after transaction: %d\n", finalCount)
 	}
 
+	// 9. HasMany Preload Demo
+	fmt.Println("\n9. HasMany Preload (User -> Posts)")
+
+	// Create posts table
+	_, _ = db.Exec(`CREATE TABLE posts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER,
+		title TEXT,
+		content TEXT,
+		metadata TEXT,
+		created_at DATETIME,
+		updated_at DATETIME
+	)`)
+
+	// Create some posts for alice (id=1)
+	_, _ = db.Exec(`INSERT INTO posts (user_id, title, content, created_at, updated_at) VALUES (1, 'Hello World', 'First post', datetime('now'), datetime('now'))`)
+	_, _ = db.Exec(`INSERT INTO posts (user_id, title, content, created_at, updated_at) VALUES (1, 'Go Tips', 'Second post', datetime('now'), datetime('now'))`)
+	_, _ = db.Exec(`INSERT INTO posts (user_id, title, content, created_at, updated_at) VALUES (2, 'Bob Post', 'Bobs post', datetime('now'), datetime('now'))`)
+
+	// Query users with preloaded posts
+	usersWithPosts, _ := userRepo.Query().
+		WithPreload(sqlc.Preload(generated.User_Posts)).
+		Where(generated.User.ID.In(1, 2)).
+		Find(ctx)
+
+	for _, u := range usersWithPosts {
+		fmt.Printf("   User %s has %d posts:\n", u.Username, len(u.Posts))
+		for _, p := range u.Posts {
+			fmt.Printf("     - %s\n", p.Title)
+		}
+	}
+
+	// 10. HasOne Preload Demo
+	fmt.Println("\n10. HasOne Preload (Post -> Author)")
+
+	// Query posts with preloaded author
+	postsWithAuthor, err := postRepo.Query(). // Need to create postRepo first
+							WithPreload(sqlc.Preload(generated.Post_Author)).
+							Find(ctx)
+	if err != nil {
+		fmt.Printf("   Error querying posts: %v\n", err)
+	}
+
+	for _, p := range postsWithAuthor {
+		authorName := "Unknown"
+		if p.Author != nil {
+			authorName = p.Author.Username
+		}
+		fmt.Printf("   Post '%s' written by %s\n", p.Title, authorName)
+	}
+
 	fmt.Println("\n=== Demo Complete ===")
 	fmt.Println("✓ CRUD operations")
 	fmt.Println("✓ Field-based queries (Eq, Like, Gt)")
 	fmt.Println("✓ Count aggregation")
 	fmt.Println("✓ Transactions with auto commit/rollback")
 	fmt.Println("✓ Lifecycle hooks (BeforeCreate, AfterCreate)")
+	fmt.Println("✓ HasMany Preload (eager loading)")
+	fmt.Println("✓ HasOne Preload (eager loading)")
 }

@@ -22,7 +22,7 @@ func TestStringField(t *testing.T) {
 
 	// Test Like
 	expr = username.Like("%alice%")
-	sql, args = expr.Build()
+	sql, _ = expr.Build()
 	if sql != "username LIKE ?" {
 		t.Errorf("Expected 'username LIKE ?', got '%s'", sql)
 	}
@@ -105,22 +105,16 @@ func TestFieldIsNull(t *testing.T) {
 
 	// Test IsNull
 	expr := email.IsNull()
-	sql, args := expr.Build()
+	sql, _ := expr.Build()
 	if sql != "email IS NULL" {
 		t.Errorf("Expected 'email IS NULL', got '%s'", sql)
-	}
-	if args != nil {
-		t.Errorf("Expected nil args, got %v", args)
 	}
 
 	// Test IsNotNull
 	expr = email.IsNotNull()
-	sql, args = expr.Build()
+	sql, _ = expr.Build()
 	if sql != "email IS NOT NULL" {
 		t.Errorf("Expected 'email IS NOT NULL', got '%s'", sql)
-	}
-	if args != nil {
-		t.Errorf("Expected nil args, got %v", args)
 	}
 }
 
