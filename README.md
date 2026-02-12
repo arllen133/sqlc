@@ -31,8 +31,8 @@ import "time"
 
 type User struct {
     ID        int64     `db:"id,primaryKey,autoIncrement"`
-    Name      string    `db:"name,size:100,unique"`
-    Age       int       `db:"age,index"`
+    Username  string    `db:"username,size:100,unique"`
+    Email     string    `db:"email,size:255"`
     CreatedAt time.Time `db:"created_at"`
 }
 ```

@@ -84,7 +84,7 @@ func TestSetBuilderAssignment(t *testing.T) {
 	builder.Path("$.views", 500)
 
 	assign := builder.Assignment(col)
-	sql, args := assign.Build()
+	sql, args, _ := assign.Build()
 
 	assert.Equal(t, "meta = ?", sql)
 	assert.Len(t, args, 1)
@@ -98,7 +98,7 @@ func TestRemoveBuilderAssignment(t *testing.T) {
 	builder.Path("$.old")
 
 	assign := builder.Assignment(col)
-	sql, args := assign.Build()
+	sql, args, _ := assign.Build()
 
 	assert.Equal(t, "meta = ?", sql)
 	assert.Len(t, args, 1)
@@ -134,7 +134,7 @@ func TestJSONPathOps(t *testing.T) {
 	t.Run("Eq", func(t *testing.T) {
 		ops := NewPathOps(col, "$.count", MySQL)
 		expr := ops.Eq(100)
-		sql, args := expr.Build()
+		sql, args, _ := expr.Build()
 
 		assert.Equal(t, "JSON_EXTRACT(meta, ?) = ?", sql)
 		assert.Equal(t, []any{"$.count", "100"}, args)
@@ -143,7 +143,7 @@ func TestJSONPathOps(t *testing.T) {
 	t.Run("Neq", func(t *testing.T) {
 		ops := NewPathOps(col, "$.status", MySQL)
 		expr := ops.Neq("draft")
-		sql, args := expr.Build()
+		sql, args, _ := expr.Build()
 
 		assert.Equal(t, "JSON_EXTRACT(meta, ?) != ?", sql)
 		assert.Equal(t, []any{"$.status", `"draft"`}, args)
@@ -152,7 +152,7 @@ func TestJSONPathOps(t *testing.T) {
 	t.Run("Gt", func(t *testing.T) {
 		ops := NewPathOps(col, "$.score", MySQL)
 		expr := ops.Gt(50)
-		sql, args := expr.Build()
+		sql, args, _ := expr.Build()
 
 		assert.Equal(t, "JSON_EXTRACT(meta, ?) > ?", sql)
 		assert.Equal(t, []any{"$.score", "50"}, args)
@@ -161,7 +161,7 @@ func TestJSONPathOps(t *testing.T) {
 	t.Run("Set", func(t *testing.T) {
 		ops := NewPathOps(col, "$.count", MySQL)
 		assign := ops.Set(200)
-		sql, args := assign.Build()
+		sql, args, _ := assign.Build()
 
 		assert.Equal(t, "meta = ?", sql)
 		assert.Len(t, args, 1)
@@ -170,7 +170,7 @@ func TestJSONPathOps(t *testing.T) {
 	t.Run("Remove", func(t *testing.T) {
 		ops := NewPathOps(col, "$.deprecated", MySQL)
 		assign := ops.Remove()
-		sql, args := assign.Build()
+		sql, args, _ := assign.Build()
 
 		assert.Equal(t, "meta = ?", sql)
 		assert.Len(t, args, 1)

@@ -166,28 +166,32 @@ func parseStringMap(expr ast.Expr) map[string]string {
 }
 
 type ModelMeta struct {
-	PackageName       string
-	ParentPackage     string // For generated code to reference parent package
-	ModulePath        string // Module path like github.com/user/project
-	PackagePath       string // Package path like models
-	ModelName         string
-	TableName         string
-	Fields            []FieldMeta
-	JSONFields        []JSONFieldMeta   // JSON field path definitions
-	Relations         []RelationMeta    // Relation definitions
-	Doc               []string          // Documentation comments
-	GeneratedAt       string            // Timestamp
-	HasJSON           bool              // Whether imported encoding/json package is needed
-	HasJSONField      bool              // Whether any field has type:json tag
-	PKFieldName       string            // Cached PK Field Name
-	PKColumnName      string            // Cached PK Column Name
-	PKFieldType       string            // Cached PK Field Type
-	IsAutoIncrementPK bool              // Cached PK AutoIncrement status
-	SchemaStructName  string            // e.g. userSchema
-	IsJSONOnly        bool              // True if struct is only used as JSON embed (no db tags/PK)
-	HasDBTag          bool              // True if any field has a db tag
-	TypeAliases       map[string]string // type A int → {"A": "int"}
-	FieldTypeMap      map[string]string // User-defined type mappings from config
+	PackageName         string
+	ParentPackage       string // For generated code to reference parent package
+	ModulePath          string // Module path like github.com/user/project
+	PackagePath         string // Package path like models
+	ModelName           string
+	TableName           string
+	Fields              []FieldMeta
+	JSONFields          []JSONFieldMeta   // JSON field path definitions
+	Relations           []RelationMeta    // Relation definitions
+	Doc                 []string          // Documentation comments
+	GeneratedAt         string            // Timestamp
+	CliVersion          string            // SQLCLI Version
+	HasJSON             bool              // Whether imported encoding/json package is needed
+	HasJSONField        bool              // Whether any field has type:json tag
+	PKFieldName         string            // Cached PK Field Name
+	PKColumnName        string            // Cached PK Column Name
+	PKFieldType         string            // Cached PK Field Type
+	IsAutoIncrementPK   bool              // Cached PK AutoIncrement status
+	SchemaStructName    string            // e.g. userSchema
+	IsJSONOnly          bool              // True if struct is only used as JSON embed (no db tags/PK)
+	HasDBTag            bool              // True if any field has a db tag
+	SoftDeleteField     string            // Name of the soft delete field (e.g. "DeletedAt")
+	SoftDeleteColumn    string            // Name of the soft delete column (e.g. "deleted_at")
+	SoftDeleteFieldType string            // Type of the soft delete field (e.g. "*time.Time")
+	TypeAliases         map[string]string // type A int → {"A": "int"}
+	FieldTypeMap        map[string]string // User-defined type mappings from config
 }
 
 // RelationMeta holds information about a model relation
@@ -427,6 +431,10 @@ func ParseModels(dir string) ([]ModelMeta, error) {
 											meta.JSONTypeName = meta.Type
 										}
 									}
+								case "softDelete":
+									model.SoftDeleteField = meta.FieldName
+									model.SoftDeleteColumn = meta.Column
+									model.SoftDeleteFieldType = meta.Type
 								}
 							}
 						}
@@ -454,6 +462,13 @@ func ParseModels(dir string) ([]ModelMeta, error) {
 						model.PKColumnName = meta.Column
 						model.PKFieldType = meta.Type
 						model.IsAutoIncrementPK = meta.AutoIncr
+					}
+
+					// Check for Soft Delete field (DeletedAt *time.Time)
+					if meta.FieldName == "DeletedAt" && (meta.Type == "*time.Time" || meta.Type == "sql.NullTime") {
+						model.SoftDeleteField = meta.FieldName
+						model.SoftDeleteColumn = meta.Column
+						model.SoftDeleteFieldType = meta.Type
 					}
 
 					// Parse relation tag

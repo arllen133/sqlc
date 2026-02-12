@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/arllen133/sqlc/cmd/sqlcli/generator"
 )
@@ -18,7 +19,22 @@ func main() {
 	recursive := flag.Bool("r", false, "recursively search subdirectories for config.go")
 	flag.Parse()
 
-	if *recursive {
+	if !*recursive {
+		// Single directory mode
+		mod, pkg, err := resolveModuleInfo(*inputDir, *modulePath, *packagePath)
+		if err != nil {
+			log.Printf("warning: failed to resolve module info: %v", err)
+		} else {
+			if *modulePath == "" {
+				*modulePath = mod
+			}
+			if *packagePath == "" {
+				*packagePath = pkg
+			}
+		}
+		processDir(*inputDir, *outDir, *modulePath, *packagePath)
+	} else {
+		// Recursive mode
 		// Find all directories containing config.go
 		dirs, err := findConfigDirs(*inputDir)
 		if err != nil {
@@ -32,13 +48,102 @@ func main() {
 
 		for _, dir := range dirs {
 			fmt.Printf("\n=== Processing %s ===\n", dir)
-			processDir(dir, *outDir, *modulePath, *packagePath)
+
+			// Resolve module info for each directory
+			mod, pkg, err := resolveModuleInfo(dir, *modulePath, *packagePath)
+			if err != nil {
+				log.Printf("warning: failed to resolve module info for %s: %v", dir, err)
+			}
+
+			// Use resolved values if flags are empty, otherwise use flags
+			effMod := *modulePath
+			if effMod == "" {
+				effMod = mod
+			}
+			effPkg := *packagePath
+			if effPkg == "" {
+				effPkg = pkg
+			}
+
+			processDir(dir, *outDir, effMod, effPkg)
 		}
-	} else {
-		processDir(*inputDir, *outDir, *modulePath, *packagePath)
 	}
 
 	fmt.Println("Done.")
+}
+
+// resolveModuleInfo attempts to determine the module path and package path
+// by looking for go.mod in parent directories.
+func resolveModuleInfo(dir, flagModule, flagPackage string) (string, string, error) {
+	// If both flags are provided, no need to resolve
+	if flagModule != "" && flagPackage != "" {
+		return flagModule, flagPackage, nil
+	}
+
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Find go.mod
+	modFile, err := findGoMod(absDir)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Parse module name from go.mod
+	modName, err := parseModuleName(modFile)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Calculate relative package path
+	modDir := filepath.Dir(modFile)
+	relPath, err := filepath.Rel(modDir, absDir)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Clean up relPath (e.g. "." -> "")
+	if relPath == "." {
+		relPath = ""
+	}
+
+	return modName, relPath, nil
+}
+
+// findGoMod searches for go.mod starting from startDir upwards
+func findGoMod(startDir string) (string, error) {
+	dir := startDir
+	for {
+		f := filepath.Join(dir, "go.mod")
+		if _, err := os.Stat(f); err == nil {
+			return f, nil
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("go.mod not found")
+		}
+		dir = parent
+	}
+}
+
+// parseModuleName reads the module name from go.mod file
+func parseModuleName(modFile string) (string, error) {
+	content, err := os.ReadFile(modFile)
+	if err != nil {
+		return "", err
+	}
+
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "module ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "module ")), nil
+		}
+	}
+	return "", fmt.Errorf("module name not found in %s", modFile)
 }
 
 // findConfigDirs recursively finds all directories containing config.go

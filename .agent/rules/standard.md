@@ -2,98 +2,127 @@
 trigger: always_on
 ---
 
-You are an expert in Go, microservices architecture, and clean backend development practices. Your role is to ensure code is idiomatic, modular, testable, and aligned with modern best practices and design patterns.
+# Modern Golang Agent Rules & Best Practices
 
-### General Responsibilities:
-- Guide the development of idiomatic, maintainable, and high-performance Go code.
-- Enforce modular design and separation of concerns through Clean Architecture.
-- Promote test-driven development, robust observability, and scalable patterns across services.
+## 1. Core Principles
 
-### Architecture Patterns:
-- Apply **Clean Architecture** by structuring code into handlers/controllers, services/use cases, repositories/data access, and domain models.
-- Use **domain-driven design** principles where applicable.
-- Prioritize **interface-driven development** with explicit dependency injection.
-- Prefer **composition over inheritance**; favor small, purpose-specific interfaces.
-- Ensure that all public functions interact with interfaces, not concrete types, to enhance flexibility and testability.
+* **Simplicity First**: Code must be intuitive and readable. Avoid over-engineering and unnecessary abstractions.
+* **Modern Features**: Fully embrace **Go 1.18+ Generics** and **Go 1.21+ Standard Library** enhancements (`slog`, `slices`, `maps`).
+* **Type Safety**: Minimize the use of `interface{}` or `any`. Leverage strong typing to ensure compile-time safety.
+* **Zero Tolerance for Deprecated APIs**: Never use functions marked as `Deprecated`. (e.g., use `os.ReadFile` instead of `ioutil.ReadFile`).
 
-### Project Structure Guidelines:
-- Use a consistent project layout:
-  - cmd/: application entrypoints
-  - internal/: core application logic (not exposed externally)
-  - pkg/: shared utilities and packages
-  - api/: gRPC/REST transport definitions and handlers
-  - configs/: configuration schemas and loading
-  - test/: test utilities, mocks, and integration tests
-- Group code by feature when it improves clarity and cohesion.
-- Keep logic decoupled from framework-specific code.
+---
 
-### Development Best Practices:
-- Write **short, focused functions** with a single responsibility.
-- Always **check and handle errors explicitly**, using wrapped errors for traceability ('fmt.Errorf("context: %w", err)').
-- Avoid **global state**; use constructor functions to inject dependencies.
-- Leverage **Go's context propagation** for request-scoped values, deadlines, and cancellations.
-- Use **goroutines safely**; guard shared state with channels or sync primitives.
-- **Defer closing resources** and handle them carefully to avoid leaks.
+## 2. Architecture & Design Patterns
 
-### Security and Resilience:
-- Apply **input validation and sanitization** rigorously, especially on inputs from external sources.
-- Use secure defaults for **JWT, cookies**, and configuration settings.
-- Isolate sensitive operations with clear **permission boundaries**.
-- Implement **retries, exponential backoff, and timeouts** on all external calls.
-- Use **circuit breakers and rate limiting** for service protection.
-- Consider implementing **distributed rate-limiting** to prevent abuse across services (e.g., using Redis).
+* **Clean Architecture**: Strictly separate layers to decouple business logic from technical implementation (frameworks, DBs):
+* `cmd/`: Application entry points.
+* `internal/`: Core business logic (private; cannot be imported by external projects).
+* `pkg/`: Exportable utility packages.
+* `api/`: Transport layer definitions (gRPC/REST handlers).
 
-### Testing:
-- Write **unit tests** using table-driven patterns and parallel execution.
-- **Mock external interfaces** cleanly using generated or handwritten mocks.
-- Separate **fast unit tests** from slower integration and E2E tests.
-- Ensure **test coverage** for every exported function, with behavioral checks.
-- Use tools like 'go test -cover' to ensure adequate test coverage.
 
-### Documentation and Standards:
-- Document public functions and packages with **GoDoc-style comments**.
-- Provide concise **READMEs** for services and libraries.
-- Maintain a 'CONTRIBUTING.md' and 'ARCHITECTURE.md' to guide team practices.
-- Enforce naming consistency and formatting with 'go fmt', 'goimports', and 'golangci-lint'.
+* **Interface-Driven Development**:
+* **Dependency Injection**: Inject dependencies via constructors; avoid global variables.
+* **Programming to Interfaces**: Public functions should accept interfaces rather than concrete implementations.
+* **Composition Over Inheritance**: Use struct embedding for functional reuse.
 
-### Observability with OpenTelemetry:
-- Use **OpenTelemetry** for distributed tracing, metrics, and structured logging.
-- Start and propagate tracing **spans** across all service boundaries (HTTP, gRPC, DB, external APIs).
-- Always attach 'context.Context' to spans, logs, and metric exports.
-- Use **otel.Tracer** for creating spans and **otel.Meter** for collecting metrics.
-- Record important attributes like request parameters, user ID, and error messages in spans.
-- Use **log correlation** by injecting trace IDs into structured logs.
-- Export data to **OpenTelemetry Collector**, **Jaeger**, or **Prometheus**.
 
-### Tracing and Monitoring Best Practices:
-- Trace all **incoming requests** and propagate context through internal and external calls.
-- Use **middleware** to instrument HTTP and gRPC endpoints automatically.
-- Annotate slow, critical, or error-prone paths with **custom spans**.
-- Monitor application health via key metrics: **request latency, throughput, error rate, resource usage**.
-- Define **SLIs** (e.g., request latency < 300ms) and track them with **Prometheus/Grafana** dashboards.
-- Alert on key conditions (e.g., high 5xx rates, DB errors, Redis timeouts) using a robust alerting pipeline.
-- Avoid excessive **cardinality** in labels and traces; keep observability overhead minimal.
-- Use **log levels** appropriately (info, warn, error) and emit **JSON-formatted logs** for ingestion by observability tools.
-- Include unique **request IDs** and trace context in all logs for correlation.
 
-### Performance:
-- Use **benchmarks** to track performance regressions and identify bottlenecks.
-- Minimize **allocations** and avoid premature optimization; profile before tuning.
-- Instrument key areas (DB, external calls, heavy computation) to monitor runtime behavior.
+---
 
-### Concurrency and Goroutines:
-- Ensure safe use of **goroutines**, and guard shared state with channels or sync primitives.
-- Implement **goroutine cancellation** using context propagation to avoid leaks and deadlocks.
+## 3. Coding Standards & Idioms
 
-### Tooling and Dependencies:
-- Rely on **stable, minimal third-party libraries**; prefer the standard library where feasible.
-- Use **Go modules** for dependency management and reproducibility.
-- Version-lock dependencies for deterministic builds.
-- Integrate **linting, testing, and security checks** in CI pipelines.
+* **Generics (Go 1.18+)**:
+* Use only for generic containers or utility functions where logic is type-agnostic.
+* If logic requires specific methods, prioritize Interface constraints over empty generics.
 
-### Key Conventions:
-1. Prioritize **readability, simplicity, and maintainability**.
-2. Design for **change**: isolate business logic and minimize framework lock-in.
-3. Emphasize clear **boundaries** and **dependency inversion**.
-4. Ensure all behavior is **observable, testable, and documented**.
-5. **Automate workflows** for testing, building, and deployment.
+
+* **Standard Library Preference**:
+* **Logging**: Use `log/slog` for structured logging. Always propagate `context`.
+* **Data Ops**: Use the `slices` (Sort, Contains) and `maps` (Keys, Values) packages for common operations.
+
+
+* **Error Handling**:
+* **Wrapping**: Use `fmt.Errorf("...: %w", err)` to preserve context.
+* **Checking**: Never use `==` for error comparison; use `errors.Is()` or `errors.As()`.
+* **Explicitness**: Always handle returned errors; never ignore them silently.
+
+
+
+---
+
+## 4. Concurrency & Context
+
+* **Context Propagation**: `ctx context.Context` must be the first parameter for all blocking, I/O, or long-running functions.
+* **Structured Concurrency**:
+* Avoid orphaned goroutines. Use `golang.org/x/sync/errgroup` to manage lifecycles.
+* Use `context` cancellation to prevent goroutine leaks and deadlocks.
+
+
+* **Concurrency Safety**: Guard shared states with channels or `sync` primitives. Strictly avoid Data Races.
+
+---
+
+## 5. Performance Optimization
+
+* **Memory Allocation**: Initialize slices with capacity where possible: `make([]T, 0, cap)`.
+* **String Manipulation**: Always use `strings.Builder` for frequent concatenations in loops.
+* **Resource Reuse**: Use `sync.Pool` for high-frequency, short-lived objects.
+* **Benchmarking**: Profile critical paths with `go test -bench` to avoid premature optimization.
+
+---
+
+## 6. Observability (OpenTelemetry)
+
+* **Distributed Tracing**:
+* Propagate Trace Context across service boundaries (HTTP, gRPC, DB).
+* Use `otel.Tracer` to create Spans. Record key attributes (User ID, Params) and errors.
+
+
+* **Metrics**:
+* Use `otel.Meter` to collect **RED** metrics (Requests, Errors, Duration).
+* Monitor Service Level Indicators (SLIs) like p99 latency and throughput.
+
+
+* **Log Correlation**: Inject `trace_id` and `span_id` into structured JSON logs for unified debugging.
+
+---
+
+## 7. Security & Resilience
+
+* **Defensive Programming**: Rigorously validate and sanitize all external inputs.
+* **Stability Patterns**: Implement **Timeouts**, **Retries (with Exponential Backoff)**, and **Circuit Breakers** for all external calls.
+* **Rate Limiting**: Implement service-level rate limiting (use Redis for distributed scenarios).
+
+---
+
+## 8. Testing & Tooling
+
+* **Test-Driven Development (TDD)**:
+* Use **Table-Driven Tests** for comprehensive edge-case coverage.
+* Ensure high coverage for exported functions with `go test -cover`.
+
+
+* **Mocking**: Use lightweight mocks via interfaces (hand-written or generated).
+* **Toolchain**:
+* Mandatory use of `golangci-lint` (enable `revive`, `staticcheck`, `govet`).
+* Automate formatting with `go fmt` and `goimports`.
+
+
+* **Documentation**: Annotate all public APIs with GoDoc comments.
+
+---
+
+## 9. Deprecated API Replacement Guide
+
+| Deprecated API | Modern Replacement |
+| --- | --- |
+| `ioutil.ReadAll` | `io.ReadAll` |
+| `ioutil.ReadFile` | `os.ReadFile` |
+| `ioutil.WriteFile` | `os.WriteFile` |
+| `ioutil.TempFile` | `os.CreateTemp` |
+| `math/rand` (for security) | `crypto/rand` |
+| `errors` (custom simple) | `fmt.Errorf("...: %w", err)` |
+
+---
