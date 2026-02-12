@@ -130,7 +130,9 @@ func NewRepository[T any](session *Session) *Repository[T] {
 func (r *Repository[T]) Where(conds ...clause.Expression) *Repository[T] {
 	// Create new Repository instance (value copy)
 	newRepo := *r
-	// Copy scopes slice, avoid sharing underlying array
+	// Explicitly copy scopes slice to avoid sharing underlying array
+	newRepo.scopes = make([]clause.Expression, len(r.scopes), len(r.scopes)+len(conds))
+	copy(newRepo.scopes, r.scopes)
 	newRepo.scopes = append(newRepo.scopes, conds...)
 	return &newRepo
 }

@@ -49,6 +49,7 @@ package sqlc
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/arllen133/sqlc/clause"
 )
@@ -365,18 +366,17 @@ func Preload[P, C any](rel Relation[P, C]) preloadExecutor[P] {
 		// These values are used to build IN query condition
 		parentIDs := make([]any, 0, len(parents))
 		// parentMap maps local key values to parent models
-		// Uses int64 as key, need to normalize various numeric types first
-		parentMap := make(map[int64][]*P)
+		// Uses fmt.Sprint as key to support any comparable type (int, string, UUID, etc.)
+		parentMap := make(map[string][]*P)
 		for _, p := range parents {
 			id := rel.GetLocalKeyValue(p)
 			parentIDs = append(parentIDs, id)
-			normalizedID := normalizeToInt64(id)
-			parentMap[normalizedID] = append(parentMap[normalizedID], p)
+			key := fmt.Sprint(id)
+			parentMap[key] = append(parentMap[key], p)
 		}
 
 		// Step 2: Build and execute IN query
 		// Query all child models whose foreign key is in parent ID list
-		childSchema := LoadSchema[C]()
 		query := Query[C](session).Where(clause.IN{
 			Column: rel.ForeignKey,
 			Values: parentIDs,
@@ -390,20 +390,20 @@ func Preload[P, C any](rel Relation[P, C]) preloadExecutor[P] {
 
 		// Step 3: Group child models by foreign key value
 		// Build mapping: foreign key value -> child model list
-		childMap := make(map[int64][]*C)
+		childMap := make(map[string][]*C)
 		for _, child := range children {
 			// Extract foreign key value from child model
 			fkValue := getFieldValue(child, rel.ForeignKey.Name)
-			normalizedFK := normalizeToInt64(fkValue)
-			childMap[normalizedFK] = append(childMap[normalizedFK], child)
+			key := fmt.Sprint(fkValue)
+			childMap[key] = append(childMap[key], child)
 		}
 
 		// Step 4: Set child models into corresponding parent models
 		for _, p := range parents {
 			id := rel.GetLocalKeyValue(p)
-			normalizedID := normalizeToInt64(id)
+			key := fmt.Sprint(id)
 			// Get all child models for this parent model
-			rel.Setter(p, childMap[normalizedID])
+			rel.Setter(p, childMap[key])
 		}
 
 		// Step 5: For HasMany, initialize empty slices
@@ -411,71 +411,14 @@ func Preload[P, C any](rel Relation[P, C]) preloadExecutor[P] {
 		if rel.Type == RelationHasMany {
 			for _, p := range parents {
 				id := rel.GetLocalKeyValue(p)
-				normalizedID := normalizeToInt64(id)
-				if _, ok := childMap[normalizedID]; !ok {
+				key := fmt.Sprint(id)
+				if _, ok := childMap[key]; !ok {
 					// No associated records, set empty slice
 					rel.Setter(p, []*C{})
 				}
 			}
 		}
 
-		// Ensure childSchema is used (avoid compiler warning)
-		_ = childSchema
 		return nil
-	}
-}
-
-// normalizeToInt64 converts common numeric types to int64.
-// Used as map key for consistent comparison.
-//
-// Supported types:
-//   - int, int8, int16, int32, int64
-//   - uint, uint8, uint16, uint32, uint64
-//   - float32, float64 (truncates decimal part)
-//
-// Parameters:
-//   - v: Value of any type
-//
-// Returns:
-//   - int64: Normalized value, returns 0 for unsupported types
-//
-// Usage scenarios:
-//   - Convert different types of IDs to unified type for map keys
-//   - Handle different integer types returned by database drivers
-//
-// Note:
-//   - Returns 0 for unsupported types
-//   - Large values (exceeding int64 range) will overflow
-//   - Float types lose precision
-func normalizeToInt64(v any) int64 {
-	switch val := v.(type) {
-	case int:
-		return int64(val)
-	case int8:
-		return int64(val)
-	case int16:
-		return int64(val)
-	case int32:
-		return int64(val)
-	case int64:
-		return val
-	case uint:
-		return int64(val)
-	case uint8:
-		return int64(val)
-	case uint16:
-		return int64(val)
-	case uint32:
-		return int64(val)
-	case uint64:
-		return int64(val)
-	case float32:
-		return int64(val)
-	case float64:
-		return int64(val)
-	default:
-		// Unsupported type returns 0
-		// This may cause data matching failure but avoids panic
-		return 0
 	}
 }

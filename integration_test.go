@@ -789,3 +789,120 @@ func TestLifecycleHooks(t *testing.T) {
 		}
 	})
 }
+
+// Tag Model (String PK)
+type Tag struct {
+	ID   string `db:"id,primaryKey"`
+	Name string `db:"name"`
+}
+
+func (Tag) TableName() string { return "tags" }
+
+type TagSchema struct{}
+
+func (TagSchema) TableName() string       { return "tags" }
+func (TagSchema) SelectColumns() []string { return []string{"id", "name"} }
+func (TagSchema) InsertRow(m *Tag) ([]string, []any) {
+	return []string{"id", "name"}, []any{m.ID, m.Name}
+}
+func (TagSchema) PK(m *Tag) sqlc.PK {
+	var val any
+	if m != nil {
+		val = m.ID
+	}
+	return sqlc.PK{Column: clause.Column{Name: "id"}, Value: val}
+}
+func (TagSchema) SetPK(m *Tag, val int64)         {} // String PK, no auto-increment
+func (TagSchema) AutoIncrement() bool             { return false }
+func (TagSchema) SoftDeleteColumn() string        { return "" }
+func (TagSchema) SoftDeleteValue() any            { return nil }
+func (TagSchema) SetDeletedAt(m *Tag)             {}
+func (TagSchema) UpdateMap(m *Tag) map[string]any { return nil }
+
+// Item Model
+type Item struct {
+	ID    int64  `db:"id,primaryKey,autoIncrement"`
+	Name  string `db:"name"`
+	TagID string `db:"tag_id"` // String FK
+}
+
+func (Item) TableName() string { return "items" }
+
+type ItemSchema struct{}
+
+func (ItemSchema) TableName() string       { return "items" }
+func (ItemSchema) SelectColumns() []string { return []string{"id", "name", "tag_id"} }
+func (ItemSchema) InsertRow(m *Item) ([]string, []any) {
+	return []string{"name", "tag_id"}, []any{m.Name, m.TagID}
+}
+func (ItemSchema) PK(m *Item) sqlc.PK {
+	var val any
+	if m != nil {
+		val = m.ID
+	}
+	return sqlc.PK{Column: clause.Column{Name: "id"}, Value: val}
+}
+func (ItemSchema) SetPK(m *Item, val int64)         { m.ID = val }
+func (ItemSchema) AutoIncrement() bool              { return true }
+func (ItemSchema) SoftDeleteColumn() string         { return "" }
+func (ItemSchema) SoftDeleteValue() any             { return nil }
+func (ItemSchema) SetDeletedAt(m *Item)             {}
+func (ItemSchema) UpdateMap(m *Item) map[string]any { return nil }
+
+var TagHasItems = sqlc.HasMany[Tag, Item](
+	clause.Column{Name: "tag_id"},
+	clause.Column{Name: "id"},
+	func(t *Tag, items []*Item) { /* Not strictly needed for logic test */ },
+	func(t *Tag) any { return t.ID },
+)
+
+func TestPreloadStringKey(t *testing.T) {
+	sqlc.RegisterSchema(TagSchema{})
+	sqlc.RegisterSchema(ItemSchema{})
+
+	db, session := setupTestDB(t)
+	defer db.Close()
+
+	_, _ = db.Exec(`CREATE TABLE tags (id TEXT PRIMARY KEY, name TEXT)`)
+	_, _ = db.Exec(`CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, tag_id TEXT)`)
+
+	tagRepo := sqlc.NewRepository[Tag](session)
+	itemRepo := sqlc.NewRepository[Item](session)
+	ctx := context.Background()
+
+	// 1. Setup Data
+	t1 := &Tag{ID: "golang", Name: "Go Programming"}
+	_ = tagRepo.Create(ctx, t1)
+
+	i1 := &Item{Name: "ORM", TagID: "golang"}
+	i2 := &Item{Name: "Generics", TagID: "golang"}
+	_ = itemRepo.Create(ctx, i1)
+	_ = itemRepo.Create(ctx, i2)
+
+	// 2. Preload and Verify
+	// We need a custom setter that we can inspect
+	var loadedItems []*Item
+	tagHasItemsInspected := sqlc.HasMany[Tag, Item](
+		clause.Column{Name: "tag_id"},
+		clause.Column{Name: "id"},
+		func(t *Tag, items []*Item) { loadedItems = items },
+		func(t *Tag) any { return t.ID },
+	)
+
+	tags, err := tagRepo.Query().
+		Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: "golang"}).
+		WithPreload(sqlc.Preload(tagHasItemsInspected)).
+		Find(ctx)
+
+	if err != nil {
+		t.Fatalf("Preload failed: %v", err)
+	}
+
+	if len(tags) != 1 {
+		t.Fatalf("Expected 1 tag, got %d", len(tags))
+	}
+
+	if len(loadedItems) != 2 {
+		t.Errorf("Expected 2 preloaded items for string key 'golang', got %d. (The bug would return 0 or all items if normalization failed)", len(loadedItems))
+	}
+}

@@ -927,8 +927,10 @@ func (q *QueryBuilder[T]) Chunk(ctx context.Context, size int, fn func([]*T) err
 		chunkQuery.columns = q.columns
 		chunkQuery.hasJoin = q.hasJoin
 		chunkQuery.preloads = q.preloads
+		chunkQuery.withTrashed = q.withTrashed
+		chunkQuery.onlyTrashed = q.onlyTrashed
 
-		// Copy the builder state
+		// Copy the builder state (inherits WHERE conditions including soft-delete from q)
 		chunkQuery.builder = q.builder.Limit(uint64(size)).Offset(offset)
 
 		results, err := chunkQuery.Find(ctx)
@@ -1092,26 +1094,6 @@ func (q *QueryBuilder[T]) FirstOr(ctx context.Context, fallback func() *T) (*T, 
 	return nil, err
 }
 
-// FirstOrCreate returns the first matching record, or returns the provided defaults
-// if no record is found. For actual creation, use Repository.FirstOrCreate.
-//
-// Example:
-//
-//	user, err := userRepo.Query().Where(generated.User.Email.Eq("test@example.com")).FirstOrCreate(ctx, &models.User{
-//	    Email: "test@example.com",
-//	    Name:  "New User",
-//	})
-func (q *QueryBuilder[T]) FirstOrCreate(ctx context.Context, defaults *T) (*T, error) {
-	result, err := q.Take(ctx)
-	if err == nil {
-		return result, nil
-	}
-	if errors.Is(err, ErrNotFound) {
-		return defaults, nil
-	}
-	return nil, err
-}
-
 // Count returns the number of records matching the query conditions.
 // Ignores any Limit/Offset settings to count all matching records.
 //
@@ -1177,14 +1159,6 @@ func (q *QueryBuilder[T]) WithBuilder(fn func(b sq.SelectBuilder) sq.SelectBuild
 // Build implements clause.Expression, enabling QueryBuilder to be used as a subquery.
 // This allows nesting queries in WHERE clauses like: WHERE id IN (SELECT ...)
 func (q *QueryBuilder[T]) Build() (string, []any, error) {
-	return q.ToSQL()
-}
-
-// BuildE is like Build but returns an error explicitly instead of embedding it in SQL.
-// Use this when you need to handle query building errors before execution.
-//
-// Deprecated: Use Build() instead.
-func (q *QueryBuilder[T]) BuildE() (string, []any, error) {
 	return q.ToSQL()
 }
 
