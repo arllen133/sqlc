@@ -61,7 +61,10 @@ func (BenchUserSchema) PK(m *BenchUser) sqlc.PK {
 func (BenchUserSchema) SetPK(m *BenchUser, val int64) {
 	m.ID = val
 }
-func (BenchUserSchema) AutoIncrement() bool { return true }
+func (BenchUserSchema) AutoIncrement() bool       { return true }
+func (BenchUserSchema) SoftDeleteColumn() string  { return "" }
+func (BenchUserSchema) SoftDeleteValue() any      { return nil }
+func (BenchUserSchema) SetDeletedAt(m *BenchUser) {}
 
 func init() {
 	sqlc.RegisterSchema(BenchUserSchema{})
@@ -111,9 +114,13 @@ func setupBenchDB(b *testing.B) (*sql.DB, *sqlc.Session) {
 	}
 
 	// Clear data
-	db.Exec("DELETE FROM bench_users")
+	if _, err := db.Exec("DELETE FROM bench_users"); err != nil {
+		b.Fatalf("Failed to clear table: %v", err)
+	}
 	if driver == "postgres" {
-		db.Exec("TRUNCATE TABLE bench_users RESTART IDENTITY")
+		if _, err := db.Exec("TRUNCATE TABLE bench_users RESTART IDENTITY"); err != nil {
+			b.Fatalf("Failed to truncate table: %v", err)
+		}
 	}
 
 	var dialect sqlc.Dialect
@@ -185,7 +192,9 @@ func BenchmarkFindID(b *testing.B) {
 
 	// Pre-seed
 	user := &BenchUser{Username: "find_me", Email: "find@test.com"}
-	repo.Create(ctx, user)
+	if err := repo.Create(ctx, user); err != nil {
+		b.Fatalf("Failed to seed user: %v", err)
+	}
 	id := user.ID
 
 	b.ResetTimer()

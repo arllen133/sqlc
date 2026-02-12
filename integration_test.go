@@ -3,7 +3,7 @@ package sqlc_test
 import (
 	"context"
 	"database/sql"
-	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,7 +82,10 @@ func (DeptSchema) PK(m *Department) sqlc.PK {
 func (DeptSchema) SetPK(m *Department, val int64) {
 	m.ID = val
 }
-func (DeptSchema) AutoIncrement() bool { return true }
+func (DeptSchema) AutoIncrement() bool        { return true }
+func (DeptSchema) SoftDeleteColumn() string   { return "" }
+func (DeptSchema) SoftDeleteValue() any       { return nil }
+func (DeptSchema) SetDeletedAt(m *Department) {}
 
 // MemberSchema
 type MemberSchema struct{}
@@ -133,7 +136,10 @@ func (MemberSchema) PK(m *Member) sqlc.PK {
 func (MemberSchema) SetPK(m *Member, val int64) {
 	m.ID = val
 }
-func (MemberSchema) AutoIncrement() bool { return true }
+func (MemberSchema) AutoIncrement() bool      { return true }
+func (MemberSchema) SoftDeleteColumn() string { return "" }
+func (MemberSchema) SoftDeleteValue() any     { return nil }
+func (MemberSchema) SetDeletedAt(m *Member)   {}
 
 func init() {
 	sqlc.RegisterSchema(DeptSchema{})
@@ -144,10 +150,6 @@ func setupIntegrationDB(t *testing.T) (*sql.DB, *sqlc.Session) {
 	db, session := setupTestDB(t) // reuse base setup for connection
 
 	// Add extra tables for integration tests
-	driver := os.Getenv("TEST_DRIVER")
-	if driver == "" {
-		driver = "sqlite3"
-	}
 	// We can infer from setup logic or pass it.
 	// setupTestDB already created 'users', we need 'departments' and 'members'
 
@@ -181,8 +183,12 @@ func setupIntegrationDB(t *testing.T) (*sql.DB, *sqlc.Session) {
 	}
 
 	// Clean tables
-	db.Exec("DELETE FROM members")
-	db.Exec("DELETE FROM departments")
+	if _, err := db.Exec("DELETE FROM members"); err != nil {
+		t.Fatalf("Failed to clean members table: %v", err)
+	}
+	if _, err := db.Exec("DELETE FROM departments"); err != nil {
+		t.Fatalf("Failed to clean departments table: %v", err)
+	}
 
 	return db, session
 }
@@ -423,7 +429,9 @@ func TestAdvancedIntegration(t *testing.T) {
 	t.Run("ScanDTO", func(t *testing.T) {
 		// Ensure data
 		m := &Member{Name: "DTOUser", Email: "dto@test.com", Level: 1, DepartmentID: 1, CreatedAt: time.Now()}
-		memberRepo.Create(ctx, m)
+		if err := memberRepo.Create(ctx, m); err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
 
 		type MemberDTO struct {
 			Name  string `db:"name"`
@@ -533,6 +541,251 @@ func TestAdvancedIntegration(t *testing.T) {
 		t.Logf("Engineering has %d members (preloaded)", len(engineering.Members))
 		for _, m := range engineering.Members {
 			t.Logf("  - %s (%s)", m.Name, m.Email)
+		}
+	})
+
+	// 11. Distinct Query
+	t.Run("DistinctQuery", func(t *testing.T) {
+		// Create members with duplicate department_ids
+		members := []*Member{
+			{Name: "Dist1", Email: "dist1@test.com", Level: 1, DepartmentID: 1, CreatedAt: time.Now()},
+			{Name: "Dist2", Email: "dist2@test.com", Level: 2, DepartmentID: 1, CreatedAt: time.Now()},
+			{Name: "Dist3", Email: "dist3@test.com", Level: 1, DepartmentID: 2, CreatedAt: time.Now()},
+		}
+		for _, m := range members {
+			if err := memberRepo.Create(ctx, m); err != nil {
+				t.Fatalf("Setup failed: %v", err)
+			}
+		}
+
+		// Without DISTINCT - should get multiple rows with same department_id
+		allMembers, err := memberRepo.Query().
+			Select(clause.Column{Name: "department_id"}).
+			Find(ctx)
+		if err != nil {
+			t.Fatalf("Query without distinct failed: %v", err)
+		}
+
+		// With DISTINCT - should get unique department_ids
+		distinctMembers, err := memberRepo.Query().
+			Distinct().
+			Select(clause.Column{Name: "department_id"}).
+			Find(ctx)
+		if err != nil {
+			t.Fatalf("Distinct query failed: %v", err)
+		}
+
+		// DISTINCT should return fewer or equal results
+		if len(distinctMembers) > len(allMembers) {
+			t.Errorf("DISTINCT should not return more rows than non-DISTINCT: got %d vs %d",
+				len(distinctMembers), len(allMembers))
+		}
+
+		// Verify we got unique department_ids
+		seenIDs := make(map[int]bool)
+		for _, m := range distinctMembers {
+			if seenIDs[m.DepartmentID] {
+				t.Errorf("DISTINCT returned duplicate department_id: %d", m.DepartmentID)
+			}
+			seenIDs[m.DepartmentID] = true
+		}
+
+		t.Logf("Without DISTINCT: %d rows, With DISTINCT: %d unique department_ids",
+			len(allMembers), len(distinctMembers))
+	})
+}
+
+func TestBasicQueryFeatures(t *testing.T) {
+	db, session := setupIntegrationDB(t)
+	defer db.Close()
+
+	memberRepo := sqlc.NewRepository[Member](session)
+	ctx := context.Background()
+
+	// Setup data: 10 members
+	for i := 1; i <= 10; i++ {
+		_ = memberRepo.Create(ctx, &Member{
+			Name:         "User" + string(rune(i+64)), // A, B, ...
+			Email:        "user" + string(rune(i+64)) + "@test.com",
+			Level:        i,
+			DepartmentID: 1,
+			CreatedAt:    time.Now(),
+		})
+	}
+
+	t.Run("Limit", func(t *testing.T) {
+		results, err := memberRepo.Query().Limit(3).Find(ctx)
+		if err != nil {
+			t.Fatalf("Limit failed: %v", err)
+		}
+		if len(results) != 3 {
+			t.Errorf("Expected 3 results, got %d", len(results))
+		}
+	})
+
+	t.Run("Offset", func(t *testing.T) {
+		results, err := memberRepo.Query().Limit(5).Offset(2).Find(ctx)
+		if err != nil {
+			t.Fatalf("Offset failed: %v", err)
+		}
+		if len(results) != 5 {
+			t.Errorf("Expected 5 results, got %d", len(results))
+		}
+	})
+
+	t.Run("First", func(t *testing.T) {
+		m, err := memberRepo.Query().OrderBy(field.Number[int64]{}.WithColumn("id").Asc()).First(ctx)
+		if err != nil {
+			t.Fatalf("First failed: %v", err)
+		}
+		if m == nil {
+			t.Fatal("Expected member")
+		}
+	})
+
+	t.Run("Last", func(t *testing.T) {
+		m, err := memberRepo.Query().OrderBy(field.Number[int64]{}.WithColumn("id").Asc()).Last(ctx)
+		if err != nil {
+			t.Fatalf("Last failed: %v", err)
+		}
+		if m == nil {
+			t.Fatal("Expected member")
+		}
+	})
+
+	t.Run("Take", func(t *testing.T) {
+		m, err := memberRepo.Query().Take(ctx)
+		if err != nil {
+			t.Fatalf("Take failed: %v", err)
+		}
+		if m == nil {
+			t.Fatal("Expected member")
+		}
+	})
+}
+
+func TestTransactions(t *testing.T) {
+	db, session := setupIntegrationDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	t.Run("SuccessfulTransaction", func(t *testing.T) {
+		err := session.Transaction(ctx, func(txSession *sqlc.Session) error {
+			txRepo := sqlc.NewRepository[Member](txSession)
+			// Create 2 members
+			if err := txRepo.Create(ctx, &Member{Name: "Tx1", Email: "tx1@test.com"}); err != nil {
+				return err
+			}
+			if err := txRepo.Create(ctx, &Member{Name: "Tx2", Email: "tx2@test.com"}); err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("Transaction failed: %v", err)
+		}
+
+		// Verify
+		count, _ := sqlc.NewRepository[Member](session).Query().
+			Where(field.String{}.WithColumn("name").Like("Tx%")).
+			Count(ctx)
+		if count != 2 {
+			t.Errorf("Expected 2 members from tx, got %d", count)
+		}
+	})
+
+	t.Run("RollbackTransaction", func(t *testing.T) {
+		err := session.Transaction(ctx, func(txSession *sqlc.Session) error {
+			txRepo := sqlc.NewRepository[Member](txSession)
+			if err := txRepo.Create(ctx, &Member{Name: "Rollback", Email: "rb@test.com"}); err != nil {
+				return err
+			}
+			return sql.ErrConnDone // Force error
+		})
+
+		if err == nil {
+			t.Error("Expected error")
+		}
+
+		// Verify not created
+		count, _ := sqlc.NewRepository[Member](session).Query().
+			Where(field.String{}.WithColumn("name").Eq("Rollback")).
+			Count(ctx)
+		if count != 0 {
+			t.Errorf("Expected 0 members, got %d", count)
+		}
+	})
+}
+
+// HookTestModel
+type HookMember struct {
+	ID        int64     `db:"id"`
+	Name      string    `db:"name"`
+	CreatedAt time.Time `db:"created_at"`
+}
+
+func (HookMember) TableName() string { return "hook_members" }
+
+// Hooks
+func (h *HookMember) BeforeCreate(ctx context.Context) error {
+	if h.CreatedAt.IsZero() {
+		h.CreatedAt = time.Now()
+	}
+	return nil
+}
+
+func (h *HookMember) AfterCreate(ctx context.Context) error {
+	h.Name = h.Name + "_hooked"
+	return nil
+}
+
+type HookMemberSchema struct{}
+
+func (HookMemberSchema) TableName() string       { return "hook_members" }
+func (HookMemberSchema) SelectColumns() []string { return []string{"id", "name", "created_at"} }
+func (HookMemberSchema) InsertRow(m *HookMember) ([]string, []any) {
+	return []string{"name", "created_at"}, []any{m.Name, m.CreatedAt}
+}
+func (HookMemberSchema) PK(m *HookMember) sqlc.PK {
+	return sqlc.PK{Column: clause.Column{Name: "id"}, Value: m.ID}
+}
+func (HookMemberSchema) SetPK(m *HookMember, val int64)         { m.ID = val }
+func (HookMemberSchema) AutoIncrement() bool                    { return true }
+func (HookMemberSchema) SoftDeleteColumn() string               { return "" }
+func (HookMemberSchema) SoftDeleteValue() any                   { return nil }
+func (HookMemberSchema) SetDeletedAt(m *HookMember)             {}
+func (HookMemberSchema) UpdateMap(m *HookMember) map[string]any { return nil } // Not used in this test
+
+func TestLifecycleHooks(t *testing.T) {
+	sqlc.RegisterSchema(HookMemberSchema{})
+	db, session := setupIntegrationDB(t)
+	defer db.Close()
+
+	// Create table for hooks
+	_, err := db.Exec("CREATE TABLE IF NOT EXISTS hook_members (id INTEGER PRIMARY KEY, name TEXT, created_at DATETIME)")
+	if err != nil {
+		t.Fatalf("Failed to create hook_members table: %v", err)
+	}
+
+	repo := sqlc.NewRepository[HookMember](session)
+	ctx := context.Background()
+
+	t.Run("Hooks", func(t *testing.T) {
+		m := &HookMember{Name: "HookTester"}
+		// BeforeCreate should set CreatedAt
+		// AfterCreate should append _hooked
+
+		err := repo.Create(ctx, m)
+		if err != nil {
+			t.Fatalf("Create failed: %v", err)
+		}
+
+		if m.CreatedAt.IsZero() {
+			t.Error("BeforeCreate hook did not run (CreatedAt is zero)")
+		}
+
+		if !strings.HasSuffix(m.Name, "_hooked") {
+			t.Errorf("AfterCreate hook did not run, name is %s", m.Name)
 		}
 	})
 }

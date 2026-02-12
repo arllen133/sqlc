@@ -44,6 +44,9 @@ func (s *obsTestSchema) PK(m *ObsTestModel) sqlc.PK {
 }
 func (s *obsTestSchema) SetPK(m *ObsTestModel, val int64) { m.ID = val }
 func (s *obsTestSchema) AutoIncrement() bool              { return true }
+func (s *obsTestSchema) SoftDeleteColumn() string         { return "" }
+func (s *obsTestSchema) SoftDeleteValue() any             { return nil }
+func (s *obsTestSchema) SetDeletedAt(m *ObsTestModel)     {}
 
 var ObsTest = obsTestSchema{}
 

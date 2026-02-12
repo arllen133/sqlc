@@ -10,7 +10,7 @@ import (
 func TestExpressions(t *testing.T) {
 	tests := []struct {
 		name     string
-		expr     interface{ Build() (string, []any) }
+		expr     interface{ Build() (string, []any, error) }
 		wantSQL  string
 		wantArgs []any
 	}{
@@ -102,7 +102,11 @@ func TestExpressions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotSQL, gotArgs := tt.expr.Build()
+			gotSQL, gotArgs, err := tt.expr.Build()
+			if err != nil {
+				t.Errorf("Build() error = %v", err)
+				return
+			}
 			if gotSQL != tt.wantSQL {
 				t.Errorf("SQL: want %q, got %q", tt.wantSQL, gotSQL)
 			}
@@ -117,7 +121,7 @@ func TestOrderBy(t *testing.T) {
 	col := clause.Column{Name: "created_at"}
 	tests := []struct {
 		name string
-		expr interface{ Build() (string, []any) }
+		expr interface{ Build() (string, []any, error) }
 		want string
 	}{
 		{
@@ -134,7 +138,12 @@ func TestOrderBy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got, _ := tt.expr.Build(); got != tt.want {
+			got, _, err := tt.expr.Build()
+			if err != nil {
+				t.Errorf("Build() error = %v", err)
+				return
+			}
+			if got != tt.want {
 				t.Errorf("want %q, got %q", tt.want, got)
 			}
 		})

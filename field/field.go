@@ -4,8 +4,6 @@ import "github.com/arllen133/sqlc/clause"
 
 // Field represents a generic field for any type.
 // Use this for types that don't have a specific field type.
-// Field represents a generic field for any type.
-// Use this for types that don't have a specific field type.
 type Field[T any] struct {
 	column clause.Column
 }

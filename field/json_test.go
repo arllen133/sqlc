@@ -32,7 +32,7 @@ func TestJSONField(t *testing.T) {
 
 	t.Run("Set assignment", func(t *testing.T) {
 		assign := meta.Set(PostMeta{ViewCount: 100, Tags: []string{"go"}})
-		sql, args := assign.Build()
+		sql, args, _ := assign.Build()
 		assert.Equal(t, "metadata = ?", sql)
 		assert.Len(t, args, 1)
 	})
