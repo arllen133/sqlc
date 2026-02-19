@@ -625,8 +625,8 @@ func parseRelationTag(fieldName, fieldType, tag string) *RelationMeta {
 	rel.TargetType = targetType
 
 	// Parse tag parts
-	parts := strings.Split(tag, ",")
-	for _, part := range parts {
+	parts := strings.SplitSeq(tag, ",")
+	for part := range parts {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue

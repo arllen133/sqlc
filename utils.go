@@ -131,7 +131,7 @@ func getFieldValue(v any, columnName string) any {
 	val := reflect.ValueOf(v)
 
 	// If pointer, dereference it
-	if val.Kind() == reflect.Ptr {
+	if val.Kind() == reflect.Pointer {
 		val = val.Elem()
 	}
 

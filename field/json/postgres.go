@@ -90,14 +90,15 @@ func (p *postgresDialect) RemoveMultiplePaths(column string, paths []string) cla
 		return clause.Expr{}
 	}
 
-	sql := column
+	var sql strings.Builder
+	sql.WriteString(column)
 	vars := make([]any, len(paths))
 	for i, path := range paths {
-		sql += " - ?"
+		sql.WriteString(" - ?")
 		vars[i] = path
 	}
 
-	return clause.Expr{SQL: sql, Vars: vars}
+	return clause.Expr{SQL: sql.String(), Vars: vars}
 }
 
 func (p *postgresDialect) MergePatch(column string, value any) clause.Expr {

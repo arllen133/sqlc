@@ -82,7 +82,7 @@ func TestJSON(t *testing.T) {
 	})
 
 	t.Run("Implements driver.Valuer", func(t *testing.T) {
-		var j interface{} = JSON[Metadata]{}
+		var j any = JSON[Metadata]{}
 		_, ok := j.(driver.Valuer)
 		assert.True(t, ok, "JSON[T] should implement driver.Valuer")
 	})

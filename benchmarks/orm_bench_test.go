@@ -168,7 +168,7 @@ func BenchmarkBatchInsert100(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		var users []*BenchUser
-		for j := 0; j < batchSize; j++ {
+		for j := range batchSize {
 			users = append(users, &BenchUser{
 				Username:  "batch",
 				Email:     fmt.Sprintf("batch%d_%d@test.com", i, j),
