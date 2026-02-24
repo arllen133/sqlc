@@ -205,6 +205,20 @@ type Relation[P, C any] struct {
 	// Example:
 	//   func(u *User) any { return u.ID }
 	GetLocalKeyValue func(parent *P) any
+
+	// GetForeignKeyValue extracts foreign key value from child model.
+	// Used to group child models by foreign key during preload.
+	// This replaces reflection-based field extraction for better performance and type safety.
+	//
+	// Parameters:
+	//   - child: Child model instance pointer
+	//
+	// Returns:
+	//   - any: Foreign key value (e.g., post's user_id)
+	//
+	// Example:
+	//   func(p *Post) any { return p.UserID }
+	GetForeignKeyValue func(child *C) any
 }
 
 // HasOne creates a HasOne relationship definition.
@@ -246,6 +260,7 @@ func HasOne[P, C any](
 	localKey clause.Column,
 	setter func(*P, *C),
 	getLocalKey func(*P) any,
+	getForeignKey func(*C) any,
 ) Relation[P, C] {
 	return Relation[P, C]{
 		Type:       RelationHasOne,
@@ -257,7 +272,8 @@ func HasOne[P, C any](
 				setter(p, children[0])
 			}
 		},
-		GetLocalKeyValue: getLocalKey,
+		GetLocalKeyValue:   getLocalKey,
+		GetForeignKeyValue: getForeignKey,
 	}
 }
 
@@ -302,13 +318,21 @@ func HasMany[P, C any](
 	localKey clause.Column,
 	setter func(*P, []*C),
 	getLocalKey func(*P) any,
+	getForeignKey func(*C) any,
 ) Relation[P, C] {
 	return Relation[P, C]{
-		Type:             RelationHasMany,
-		ForeignKey:       foreignKey,
-		LocalKey:         localKey,
-		Setter:           setter,
-		GetLocalKeyValue: getLocalKey,
+		Type:       RelationHasMany,
+		ForeignKey: foreignKey,
+		LocalKey:   localKey,
+		Setter: func(p *P, children []*C) {
+			// Ensure parent models without associated records also have empty slices (not nil)
+			if len(children) == 0 {
+				children = []*C{}
+			}
+			setter(p, children)
+		},
+		GetLocalKeyValue:   getLocalKey,
+		GetForeignKeyValue: getForeignKey,
 	}
 }
 
@@ -364,22 +388,16 @@ func Preload[P, C any](rel Relation[P, C]) preloadExecutor[P] {
 
 		// Step 1: Collect local key values from all parent models
 		// These values are used to build IN query condition
-		parentIDs := make([]any, 0, len(parents))
-		// parentMap maps local key values to parent models
-		// Uses fmt.Sprint as key to support any comparable type (int, string, UUID, etc.)
-		parentMap := make(map[string][]*P)
-		for _, p := range parents {
-			id := rel.GetLocalKeyValue(p)
-			parentIDs = append(parentIDs, id)
-			key := fmt.Sprint(id)
-			parentMap[key] = append(parentMap[key], p)
+		foreignKeys := make([]any, len(parents))
+		for i := range parents {
+			foreignKeys[i] = rel.GetLocalKeyValue(parents[i])
 		}
 
 		// Step 2: Build and execute IN query
 		// Query all child models whose foreign key is in parent ID list
 		query := Query[C](session).Where(clause.IN{
 			Column: rel.ForeignKey,
-			Values: parentIDs,
+			Values: foreignKeys,
 		})
 
 		// Execute query to get all associated child models
@@ -392,8 +410,8 @@ func Preload[P, C any](rel Relation[P, C]) preloadExecutor[P] {
 		// Build mapping: foreign key value -> child model list
 		childMap := make(map[string][]*C)
 		for _, child := range children {
-			// Extract foreign key value from child model
-			fkValue := getFieldValue(child, rel.ForeignKey.Name)
+			// Extract foreign key value from child model using generated accessor
+			fkValue := rel.GetForeignKeyValue(child)
 			key := fmt.Sprint(fkValue)
 			childMap[key] = append(childMap[key], child)
 		}
@@ -404,19 +422,6 @@ func Preload[P, C any](rel Relation[P, C]) preloadExecutor[P] {
 			key := fmt.Sprint(id)
 			// Get all child models for this parent model
 			rel.Setter(p, childMap[key])
-		}
-
-		// Step 5: For HasMany, initialize empty slices
-		// Ensure parent models without associated records also have empty slices (not nil)
-		if rel.Type == RelationHasMany {
-			for _, p := range parents {
-				id := rel.GetLocalKeyValue(p)
-				key := fmt.Sprint(id)
-				if _, ok := childMap[key]; !ok {
-					// No associated records, set empty slice
-					rel.Setter(p, []*C{})
-				}
-			}
 		}
 
 		return nil

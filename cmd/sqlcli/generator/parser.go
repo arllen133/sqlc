@@ -176,7 +176,6 @@ type ModelMeta struct {
 	JSONFields          []JSONFieldMeta   // JSON field path definitions
 	Relations           []RelationMeta    // Relation definitions
 	Doc                 []string          // Documentation comments
-	GeneratedAt         string            // Timestamp
 	CliVersion          string            // SQLCLI Version
 	HasJSON             bool              // Whether imported encoding/json package is needed
 	HasJSONField        bool              // Whether any field has type:json tag
@@ -202,7 +201,43 @@ type RelationMeta struct {
 	LocalKey        string // Local key column (on parent for hasOne/Many[default id], on child for belongsTo[default id])
 	TargetType      string // Target model type name (e.g., "Post")
 	TargetSlice     bool   // True if field is a slice (hasMany)
-	ForeignKeyField string // Go field name of foreign key (only for belongsTo)
+	ForeignKeyField string // Go field name of foreign key (on parent for belongsTo, on target for hasOne/hasMany)
+	TargetPKField   string // Go field name of PK on target model (used for belongsTo getForeignKey)
+}
+
+// ResolveRelationFields resolves ForeignKeyField across models for hasOne/hasMany relations.
+// For belongsTo, ForeignKeyField is on the parent model (resolved during parsing).
+// For hasOne/hasMany, ForeignKeyField is on the target model and needs cross-model lookup.
+func ResolveRelationFields(models []ModelMeta) {
+	// Build a map of model name -> ModelMeta for quick lookup
+	modelMap := make(map[string]*ModelMeta, len(models))
+	for i := range models {
+		modelMap[models[i].ModelName] = &models[i]
+	}
+
+	for i := range models {
+		for j := range models[i].Relations {
+			rel := &models[i].Relations[j]
+			target := modelMap[rel.TargetType]
+			if target == nil {
+				continue
+			}
+
+			switch rel.RelType {
+			case "hasOne", "hasMany":
+				// ForeignKeyField = Go field on target model matching foreignKey column
+				for _, f := range target.Fields {
+					if f.Column == rel.ForeignKey {
+						rel.ForeignKeyField = f.FieldName
+						break
+					}
+				}
+			case "belongsTo":
+				// TargetPKField = Go field name of PK on target model
+				rel.TargetPKField = target.PKFieldName
+			}
+		}
+	}
 }
 
 type FieldMeta struct {

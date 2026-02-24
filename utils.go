@@ -3,15 +3,11 @@
 //
 // Utility functions include:
 //   - ResolveColumnNames: Extract column names from Columnar interface slice
-//   - getFieldValue: Extract specified column value from a struct
 //
 // These functions are infrastructure for internal ORM implementation and are typically not called directly by external code.
 package sqlc
 
 import (
-	"reflect"
-	"strings"
-
 	"github.com/arllen133/sqlc/clause"
 )
 
@@ -67,107 +63,4 @@ func ResolveColumnNames(args []clause.Columnar) []string {
 		cols[i] = arg.ColumnName()
 	}
 	return cols
-}
-
-// getFieldValue extracts a field value from a struct by column name.
-// This is an internal function used to extract foreign key values from models during relation loading.
-//
-// Parameters:
-//   - v: Any type value (usually a pointer to a struct)
-//   - columnName: Database column name
-//
-// Returns:
-//   - any: Field value, returns nil if not found
-//
-// Matching rules:
-//  1. First checks struct tag `db:"column_name"`, supports format with options (e.g., `db:"name,primaryKey"`)
-//  2. If no db tag, matches by field name (case-insensitive)
-//
-// Supported types:
-//   - Pointer types: Automatically dereferenced
-//   - Struct types: Iterates through fields to find match
-//   - Other types: Returns nil
-//
-// Usage scenarios:
-//   - Relation loading: Extract foreign key values from child models
-//   - Data mapping: Map model fields to database columns
-//
-// Example:
-//
-//	type User struct {
-//	    ID       int64  `db:"id,primaryKey"`
-//	    Email    string `db:"email"`
-//	    Name     string `db:"name"`
-//	    Password string `db:"password_hash"` // Column name differs from field name
-//	}
-//
-//	user := &User{ID: 123, Email: "test@example.com", Name: "Test"}
-//
-//	// Match via db tag
-//	id := getFieldValue(user, "id")           // 123 (int64)
-//	email := getFieldValue(user, "email")     // "test@example.com"
-//	pwd := getFieldValue(user, "password_hash") // "" (empty string)
-//
-//	// Match via field name (case-insensitive)
-//	name := getFieldValue(user, "Name")       // "Test"
-//	name2 := getFieldValue(user, "NAME")      // "Test"
-//
-//	// Not found
-//	unknown := getFieldValue(user, "unknown") // nil
-//
-// Notes:
-//   - For pointer types, automatically dereferences
-//   - If pointer is nil, returns nil (reflect.Value.IsZero)
-//   - Only supports exported fields (capitalized first letter)
-//   - Does not support recursive lookup in nested structs
-//   - Does not support complex types like map, slice, etc.
-//
-// Implementation details:
-//   - Uses reflect package for runtime type checking
-//   - Parses db tag with support for comma-separated options
-//   - Field name matching uses strings.EqualFold (case-insensitive)
-func getFieldValue(v any, columnName string) any {
-	// Get reflection value
-	val := reflect.ValueOf(v)
-
-	// If pointer, dereference it
-	if val.Kind() == reflect.Pointer {
-		val = val.Elem()
-	}
-
-	// Ensure it's a struct type
-	if val.Kind() != reflect.Struct {
-		return nil
-	}
-
-	// Get struct type information
-	typ := val.Type()
-
-	// Iterate through all fields
-	for i := 0; i < typ.NumField(); i++ {
-		field := typ.Field(i)
-
-		// Priority: check db tag
-		// Format: `db:"column_name"` or `db:"column_name,options"`
-		if dbTag := field.Tag.Get("db"); dbTag != "" {
-			// Parse db tag, supports comma-separated options
-			// Example: "id,primaryKey" -> ["id", "primaryKey"]
-			parts := strings.Split(dbTag, ",")
-
-			// Check if column name matches
-			if parts[0] == columnName {
-				// Return field value
-				return val.Field(i).Interface()
-			}
-		}
-
-		// Fallback: match by field name (case-insensitive)
-		// This allows working without db tags
-		if strings.EqualFold(field.Name, columnName) {
-			return val.Field(i).Interface()
-		}
-	}
-
-	// No matching field found
-	return nil
 }

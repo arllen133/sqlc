@@ -34,6 +34,7 @@ var DepartmentHasMembers = sqlc.HasMany[Department, Member](
 	clause.Column{Name: "id"},                                      // Local key on Department
 	func(d *Department, members []*Member) { d.Members = members }, // Setter
 	func(d *Department) any { return d.ID },                        // Get local key
+	func(m *Member) any { return m.DepartmentID },                  // Get foreign key
 )
 
 // Member Model (Advanced User)
@@ -854,6 +855,7 @@ var TagHasItems = sqlc.HasMany[Tag, Item](
 	clause.Column{Name: "id"},
 	func(t *Tag, items []*Item) { /* Not strictly needed for logic test */ },
 	func(t *Tag) any { return t.ID },
+	func(i *Item) any { return i.TagID },
 )
 
 func TestPreloadStringKey(t *testing.T) {
@@ -887,6 +889,7 @@ func TestPreloadStringKey(t *testing.T) {
 		clause.Column{Name: "id"},
 		func(t *Tag, items []*Item) { loadedItems = items },
 		func(t *Tag) any { return t.ID },
+		func(i *Item) any { return i.TagID },
 	)
 
 	tags, err := tagRepo.Query().

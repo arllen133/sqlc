@@ -268,14 +268,13 @@ if len(assignments) == 0 {
 // Package sqlc provides a type-safe ORM for Go using generics and code generation.
 //
 // Example usage:
-//
-//	session := sqlc.NewSession(db, sqlc.MySQL{})
-//	userRepo := sqlc.NewRepository[models.User](session)
-//	
-//	user, err := userRepo.Query().
-//	    Where(generated.User.Email.Eq("user@example.com")).
-//	    First(ctx)
-package sqlc
+
+session := sqlc.NewSession(db, sqlc.MySQL{})
+userRepo := sqlc.NewRepository[models.User](session)
+
+user, err := userRepo.Query().
+    Where(generated.User.Email.Eq("user@example.com")).
+    First(ctx)
 ```
 
 **Function Documentation:**
@@ -285,13 +284,12 @@ package sqlc
 // For auto-increment primary keys, the ID is set on the model after insertion.
 //
 // Example:
-//
-//	user := &models.User{Email: "test@example.com"}
-//	if err := repo.Create(ctx, user); err != nil {
-//	    return err
-//	}
-//	fmt.Println(user.ID) // Populated by auto-increment
-func (r *Repository[T]) Create(ctx context.Context, model *T) error
+
+user := &models.User{Email: "test@example.com"}
+if err := repo.Create(ctx, user); err != nil {
+    return err
+}
+fmt.Println(user.ID) // Populated by auto-increment
 ```
 
 ### Lifecycle Hooks

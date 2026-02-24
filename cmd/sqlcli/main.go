@@ -201,6 +201,9 @@ func processDir(modelDir, outDir, modulePath, packagePath string) {
 		}
 	}
 
+	// Resolve cross-model relation fields (e.g., FK field names on target models)
+	generator.ResolveRelationFields(models)
+
 	for _, m := range models {
 		fmt.Printf("Generating schema for %s...\n", m.ModelName)
 		if err := generator.GenerateFile(m, effectiveOutDir); err != nil {
