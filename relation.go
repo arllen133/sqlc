@@ -195,11 +195,24 @@ func Preload[P, C any, K comparable](
 			}
 		}
 
-		// Step 2: Build and execute IN query
-		query := Query[C](session).Where(clause.IN{
-			Column: rel.ForeignKey,
-			Values: foreignKeys,
-		})
+		// Fast return: all keys deduplicated to empty (e.g., all zero values filtered)
+		if len(foreignKeys) == 0 {
+			return nil
+		}
+
+		// Step 2: Build query with optimal expression
+		query := Query[C](session)
+		if len(foreignKeys) == 1 {
+			query = query.Where(clause.Eq{
+				Column: rel.ForeignKey,
+				Value:  foreignKeys[0],
+			})
+		} else {
+			query = query.Where(clause.IN{
+				Column: rel.ForeignKey,
+				Values: foreignKeys,
+			})
+		}
 
 		// Apply user-provided query customizations
 		for _, opt := range opts {
