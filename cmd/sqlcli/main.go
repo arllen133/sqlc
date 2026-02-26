@@ -17,7 +17,14 @@ func main() {
 	modulePath := flag.String("module", "", "module path (e.g., github.com/user/project)")
 	packagePath := flag.String("package", "", "package path relative to module (e.g., models)")
 	recursive := flag.Bool("r", false, "recursively search subdirectories for config.go")
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.BoolVar(showVersion, "v", false, "print version and exit (shorthand)")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("sqlcli version %s\n", generator.Version)
+		return
+	}
 
 	if !*recursive {
 		// Single directory mode

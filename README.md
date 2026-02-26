@@ -49,6 +49,23 @@ This generates `models/generated/user_gen.go`, containing:
 - `generated.User` - Schema instance with type-safe field definitions.
 - `generated.UserMetadata` - JSON path accessors (if JSON fields exist).
 
+> [!NOTE]
+> Generated filenames always use `snake_case` (e.g., `user_config_gen.go` for a `UserConfig` struct).
+
+### CLI Versioning
+
+You can check the version of `sqlcli` using the `-v` flag:
+
+```bash
+sqlcli -v
+```
+
+When building `sqlcli` from source, you can inject a version string using `-ldflags`:
+
+```bash
+go build -ldflags="-X 'github.com/arllen133/sqlc/cmd/sqlcli/generator.Version=v1.2.3'" ./cmd/sqlcli
+```
+
 ### Declarative Configuration (Optional)
 
 Create a `config.go` file in your model directory to customize code generation:
@@ -122,6 +139,41 @@ func main() {
 ```
 
 ## Advanced Features
+
+### Soft Delete
+
+Models with a `DeletedAt` field (e.g., `*time.Time`, `sql.NullTime`, or numeric unix timestamps) automatically support soft delete.
+
+```go
+type Product struct {
+    ID        int64      `db:"id,primaryKey,autoIncrement"`
+    Name      string     `db:"name"`
+    DeletedAt *time.Time `db:"deleted_at,softDelete"` // Enables soft delete
+}
+```
+
+By default, all queries automatically filter out soft-deleted records. You can modify this behavior:
+
+```go
+// 1. Default: Automatically filters soft-deleted records
+activeProducts, _ := repo.Query().Find(ctx) // WHERE deleted_at IS NULL
+
+// 2. Include deleted records
+allProducts, _ := repo.Query().WithTrashed().Find(ctx)
+
+// 3. Query ONLY deleted records
+deletedProducts, _ := repo.Query().OnlyTrashed().Find(ctx)
+```
+
+Soft-deleted records can be permanently removed (hard deleted) using the `Unscoped()` repository wrapper:
+
+```go
+// Soft delete (sets deleted_at)
+repo.Delete(ctx, productID)
+
+// Hard delete (DELETE FROM products WHERE id = ...)
+repo.Unscoped().Delete(ctx, productID)
+```
 
 ### Transactions
 
@@ -232,10 +284,10 @@ sqlcli -i ./models
 
 #### Eager Loading (Preload)
 
-Use `WithPreload` to load relationships efficiently (usually via logical IN queries).
+Use `WithPreload` to load relationships efficiently (usually via logical IN queries). `WithPreload` also supports customizing the child query via variadic options.
 
 ```go
-// Load Users with their Posts
+// 1. Basic Preload: Load Users with ALL their Posts
 users, _ := userRepo.Query().
     WithPreload(sqlc.Preload(generated.User_Posts)).
     Find(ctx)
@@ -244,7 +296,16 @@ for _, u := range users {
     fmt.Printf("User %d has %d posts\n", u.ID, len(u.Posts))
 }
 
-// Load Posts with their Author
+// 2. Custom Preload: Load Users and ONLY their published posts
+usersWithPubPosts, _ := userRepo.Query().
+    WithPreload(sqlc.Preload(generated.User_Posts, func(q *sqlc.QueryBuilder[models.Post]) *sqlc.QueryBuilder[models.Post] {
+        return q.Where(generated.Post.Status.Eq("published")).
+                 OrderBy(generated.Post.CreatedAt.Desc()).
+                 Limit(5) // Only fetch the 5 most recent published posts per user
+    })).
+    Find(ctx)
+
+// 3. Load Posts with their Author
 posts, _ := postRepo.Query().
     WithPreload(sqlc.Preload(generated.Post_Author)).
     Find(ctx)

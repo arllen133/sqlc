@@ -90,7 +90,6 @@ func (s *userSchema) SetDeletedAt(m *models.User) {
 
 // User_Posts defines hasMany relation: User has many Post
 var User_Posts = sqlc.HasMany(
-
 	clause.Column{Name: "user_id"},
 	clause.Column{Name: "id"},
 	func(p *models.User, children []*models.Post) { p.Posts = children },

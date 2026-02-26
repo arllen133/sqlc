@@ -96,7 +96,6 @@ func (s *postSchema) SetDeletedAt(m *models.Post) {
 
 // Post_Author defines belongsTo relation: Post has one User
 var Post_Author = sqlc.HasOne(
-
 	clause.Column{Name: "id"},
 	clause.Column{Name: "user_id"},
 	func(p *models.Post, child *models.User) { p.Author = child },

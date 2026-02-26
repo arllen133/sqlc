@@ -792,6 +792,7 @@ func (q *QueryBuilder[T]) Having(expr clause.Expression) *QueryBuilder[T] {
 
 // WithPreload adds a preload executor to load related data after the main query.
 // Use with Preload() function to create type-safe preload executors.
+// It supports customizing the loaded child models by providing optional query builder functions to sqlc.Preload().
 func (q *QueryBuilder[T]) WithPreload(preload preloadExecutor[T]) *QueryBuilder[T] {
 	q.preloads = append(q.preloads, preload)
 	return q

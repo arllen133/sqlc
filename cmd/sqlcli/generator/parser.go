@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+
+	"golang.org/x/tools/go/packages"
 )
 
 // GenConfig holds parsed configuration from config.go
@@ -270,18 +272,30 @@ type JSONPathMeta struct {
 	JSONPath string // JSON path (e.g. "$.name")
 }
 
+// ParseModels parses Go source files in the given directory using golang.org/x/tools/go/packages.
+// It automatically handles build tags and identifies struct types with `db` tags.
 func ParseModels(dir string) ([]ModelMeta, error) {
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, nil, parser.ParseComments)
+	cfg := &packages.Config{
+		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedSyntax,
+		Dir:   dir,
+		Tests: false,
+	}
+	pkgs, err := packages.Load(cfg, ".")
 	if err != nil {
 		return nil, err
 	}
 
 	var models []ModelMeta
-	for pkgName, pkg := range pkgs {
+	for _, pkg := range pkgs {
+		if len(pkg.Errors) > 0 {
+			return nil, fmt.Errorf("packages load error: %v", pkg.Errors)
+		}
+
+		pkgName := pkg.Name
+
 		// First pass: collect type aliases (type A int)
 		typeAliases := make(map[string]string)
-		for _, file := range pkg.Files {
+		for _, file := range pkg.Syntax {
 			ast.Inspect(file, func(n ast.Node) bool {
 				ts, ok := n.(*ast.TypeSpec)
 				if !ok {
@@ -300,7 +314,8 @@ func ParseModels(dir string) ([]ModelMeta, error) {
 		}
 
 		// Second pass: collect structs
-		for filename, file := range pkg.Files {
+		for _, file := range pkg.Syntax {
+			filename := pkg.Fset.Position(file.Pos()).Filename
 			if strings.HasSuffix(filename, "_gen.go") {
 				continue
 			}
@@ -548,6 +563,8 @@ func ParseModels(dir string) ([]ModelMeta, error) {
 	return models, nil
 }
 
+// toSnakeCase converts a string to snake_case.
+// It is used for generating database column names and file names.
 func toSnakeCase(s string) string {
 	var res strings.Builder
 	for i, r := range s {
@@ -563,17 +580,25 @@ func toSnakeCase(s string) string {
 	return res.String()
 }
 
-// parseJSONStructPaths parses a directory for a struct type and extracts JSON paths
+// parseJSONStructPaths parses a directory for a struct type and extracts JSON paths.
+// It uses golang.org/x/tools/go/packages for robust package parsing.
 func parseJSONStructPaths(dir string, typeName string, prefix string) []JSONPathMeta {
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, nil, parser.ParseComments)
+	cfg := &packages.Config{
+		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedSyntax,
+		Dir:   dir,
+		Tests: false,
+	}
+	pkgs, err := packages.Load(cfg, ".")
 	if err != nil {
 		return nil
 	}
 
 	var paths []JSONPathMeta
 	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
+		if len(pkg.Errors) > 0 {
+			return nil
+		}
+		for _, file := range pkg.Syntax {
 			ast.Inspect(file, func(n ast.Node) bool {
 				ts, ok := n.(*ast.TypeSpec)
 				if !ok || ts.Name.Name != typeName {

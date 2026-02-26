@@ -48,7 +48,7 @@ type Executor interface {
 // Usage example:
 //
 //	// Create session
-//	session := sqlc.NewSession(db, sqlc.MySQL{})
+//	session := sqlc.NewSession(db, sqlc.MySQL)
 //
 //	// Regular query
 //	users, err := userRepo.Query().Find(ctx)
@@ -81,16 +81,16 @@ type Session struct {
 // Example:
 //
 //	// Basic usage
-//	session := sqlc.NewSession(db, sqlc.MySQL{})
+//	session := sqlc.NewSession(db, sqlc.MySQL)
 //
 //	// With logging
-//	session := sqlc.NewSession(db, sqlc.MySQL{},
+//	session := sqlc.NewSession(db, sqlc.MySQL,
 //	    sqlc.WithLogger(slog.Default()),
 //	    sqlc.WithQueryLogging(true),
 //	)
 //
 //	// With tracing and metrics
-//	session := sqlc.NewSession(db, sqlc.PostgreSQLDialect{},
+//	session := sqlc.NewSession(db, sqlc.PostgreSQL,
 //	    sqlc.WithDefaultTracer(),
 //	    sqlc.WithDefaultMeter(),
 //	)
