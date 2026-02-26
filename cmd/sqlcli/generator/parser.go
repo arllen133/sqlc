@@ -195,14 +195,15 @@ type ModelMeta struct {
 
 // RelationMeta holds information about a model relation
 type RelationMeta struct {
-	FieldName       string // Field name in parent model (e.g., "Posts")
-	RelType         string // Relation type: "hasOne", "hasMany", "belongsTo"
-	ForeignKey      string // Foreign key column (on child for hasOne/Many, on parent for belongsTo)
-	LocalKey        string // Local key column (on parent for hasOne/Many[default id], on child for belongsTo[default id])
-	TargetType      string // Target model type name (e.g., "Post")
-	TargetSlice     bool   // True if field is a slice (hasMany)
-	ForeignKeyField string // Go field name of foreign key (on parent for belongsTo, on target for hasOne/hasMany)
-	TargetPKField   string // Go field name of PK on target model (used for belongsTo getForeignKey)
+	FieldName           string // Field name in parent model (e.g., "Posts")
+	RelType             string // Relation type: "hasOne", "hasMany", "belongsTo"
+	ForeignKey          string // Foreign key column (on child for hasOne/Many, on parent for belongsTo)
+	LocalKey            string // Local key column (on parent for hasOne/Many[default id], on child for belongsTo[default id])
+	TargetType          string // Target model type name (e.g., "Post")
+	TargetSlice         bool   // True if field is a slice (hasMany)
+	ForeignKeyField     string // Go field name of foreign key (on parent for belongsTo, on target for hasOne/hasMany)
+	ForeignKeyFieldType string // Go type of FK field; set only if it differs from parent PK type (for type conversion)
+	TargetPKField       string // Go field name of PK on target model (used for belongsTo getForeignKey)
 }
 
 // ResolveRelationFields resolves ForeignKeyField across models for hasOne/hasMany relations.
@@ -229,6 +230,10 @@ func ResolveRelationFields(models []ModelMeta) {
 				for _, f := range target.Fields {
 					if f.Column == rel.ForeignKey {
 						rel.ForeignKeyField = f.FieldName
+						// If FK type differs from parent PK type, record it for type conversion
+						if f.Type != models[i].PKFieldType {
+							rel.ForeignKeyFieldType = models[i].PKFieldType
+						}
 						break
 					}
 				}

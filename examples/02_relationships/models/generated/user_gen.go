@@ -94,6 +94,6 @@ var User_Posts = sqlc.HasMany(
 	clause.Column{Name: "user_id"},
 	clause.Column{Name: "id"},
 	func(p *models.User, children []*models.Post) { p.Posts = children },
-	func(p *models.User) any { return p.ID },
-	func(c *models.Post) any { return c.UserID },
+	func(p *models.User) int64 { return p.ID },
+	func(c *models.Post) int64 { return c.UserID },
 )

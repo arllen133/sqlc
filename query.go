@@ -209,6 +209,8 @@ func Query[T any](session *Session) *QueryBuilder[T] {
 
 	// Create Squirrel SelectBuilder
 	// Initially don't set columns, will be set as needed in Find()
+	// Soft delete conditions are NOT added here; they are applied lazily
+	// in resolveBuilder() to avoid being discarded by WithTrashed()/OnlyTrashed().
 	sb := sq.Select().
 		From(table).
 		PlaceholderFormat(session.dialect.PlaceholderFormat())
@@ -219,12 +221,6 @@ func Query[T any](session *Session) *QueryBuilder[T] {
 		schema:  schema,
 		builder: sb,
 		table:   table,
-	}
-
-	// If model supports soft delete, automatically add filter condition
-	// This ensures deleted records are not returned by default
-	if sdCol := q.schema.SoftDeleteColumn(); sdCol != "" {
-		q.builder = q.builder.Where(sq.Eq{sdCol: nil})
 	}
 
 	return q
@@ -414,13 +410,6 @@ func (q *QueryBuilder[T]) Select(columns ...clause.Columnar) *QueryBuilder[T] {
 //	repo.Query().WithTrashed().Find(ctx)
 func (q *QueryBuilder[T]) WithTrashed() *QueryBuilder[T] {
 	q.withTrashed = true
-	// Remove the soft delete filter by rebuilding the query
-	if sdCol := q.schema.SoftDeleteColumn(); sdCol != "" {
-		// Rebuild builder without the deleted_at filter
-		q.builder = sq.Select().
-			From(q.table).
-			PlaceholderFormat(q.session.dialect.PlaceholderFormat())
-	}
 	return q
 }
 
@@ -432,13 +421,6 @@ func (q *QueryBuilder[T]) WithTrashed() *QueryBuilder[T] {
 func (q *QueryBuilder[T]) OnlyTrashed() *QueryBuilder[T] {
 	q.onlyTrashed = true
 	q.withTrashed = true
-	if sdCol := q.schema.SoftDeleteColumn(); sdCol != "" {
-		// Rebuild builder with deleted_at IS NOT NULL filter
-		q.builder = sq.Select().
-			From(q.table).
-			Where(sq.NotEq{sdCol: nil}).
-			PlaceholderFormat(q.session.dialect.PlaceholderFormat())
-	}
 	return q
 }
 
@@ -853,7 +835,7 @@ func (q *QueryBuilder[T]) Find(ctx context.Context) ([]*T, error) {
 	if q.err != nil {
 		return nil, q.err
 	}
-	b := q.builder.Columns(q.resolveColumns()...)
+	b := q.resolveBuilder().Columns(q.resolveColumns()...)
 	query, args, err := b.ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("sqlc: failed to build sql: %w", err)
@@ -887,7 +869,7 @@ func (q *QueryBuilder[T]) Pluck(ctx context.Context, column clause.Columnar, des
 		return q.err
 	}
 	colName := column.ColumnName()
-	b := q.builder.Columns(colName)
+	b := q.resolveBuilder().Columns(colName)
 	query, args, err := b.ToSql()
 	if err != nil {
 		return fmt.Errorf("sqlc: failed to build sql: %w", err)
@@ -920,17 +902,9 @@ func (q *QueryBuilder[T]) Chunk(ctx context.Context, size int, fn func([]*T) err
 
 	offset := uint64(0)
 	for {
-		// Create a new query for each chunk to avoid mutation issues
-		chunkQuery := Query[T](q.session)
-		chunkQuery.table = q.table
-		chunkQuery.schema = q.schema
-		chunkQuery.columns = q.columns
-		chunkQuery.hasJoin = q.hasJoin
-		chunkQuery.preloads = q.preloads
-		chunkQuery.withTrashed = q.withTrashed
-		chunkQuery.onlyTrashed = q.onlyTrashed
-
-		// Copy the builder state (inherits WHERE conditions including soft-delete from q)
+		// Copy the current QueryBuilder to avoid mutation issues.
+		// Uses struct copy (sq.SelectBuilder is a value type, so this is safe).
+		chunkQuery := *q
 		chunkQuery.builder = q.builder.Limit(uint64(size)).Offset(offset)
 
 		results, err := chunkQuery.Find(ctx)
@@ -964,7 +938,7 @@ func (q *QueryBuilder[T]) Scan(ctx context.Context, dest any) error {
 		return q.err
 	}
 	// Apply columns to builder
-	b := q.builder.Columns(q.resolveColumns()...)
+	b := q.resolveBuilder().Columns(q.resolveColumns()...)
 	query, args, err := b.ToSql()
 	if err != nil {
 		return fmt.Errorf("sqlc: failed to build sql: %w", err)
@@ -1131,9 +1105,8 @@ func (q *QueryBuilder[T]) Count(ctx context.Context) (int64, error) {
 		return 0, q.err
 	}
 	// Use explicit cleaner count query
-	// Note: squirrel's SelectBuilder is immutable, so we can work on q.builder safely if we copy?
-	// Actually sq.SelectBuilder IS a struct value, so copying it works.
-	b := q.builder.Columns("COUNT(*)")
+	// sq.SelectBuilder is a struct value, so copying via method chain is safe.
+	b := q.resolveBuilder().Columns("COUNT(*)")
 
 	// Remove Limit/Offset for Count
 	b = b.RemoveLimit().RemoveOffset()
@@ -1168,8 +1141,27 @@ func (q *QueryBuilder[T]) ToSQL() (string, []any, error) {
 	if q.err != nil {
 		return "", nil, q.err
 	}
-	b := q.builder.Columns(q.resolveColumns()...)
+	b := q.resolveBuilder().Columns(q.resolveColumns()...)
 	return b.ToSql()
+}
+
+// resolveBuilder returns the builder with soft delete conditions applied.
+// Soft delete conditions are injected lazily here (not in Query() constructor)
+// so that WithTrashed()/OnlyTrashed() flags work correctly regardless of call order.
+func (q *QueryBuilder[T]) resolveBuilder() sq.SelectBuilder {
+	b := q.builder
+	sdCol := q.schema.SoftDeleteColumn()
+	if sdCol == "" || q.withTrashed {
+		// No soft delete, or explicitly including trashed records
+		if q.onlyTrashed && sdCol != "" {
+			// OnlyTrashed: return only soft-deleted records
+			b = b.Where(sq.NotEq{sdCol: nil})
+		}
+		return b
+	}
+	// Default: exclude soft-deleted records
+	b = b.Where(sq.Eq{sdCol: nil})
+	return b
 }
 
 func (q *QueryBuilder[T]) resolveColumns() []string {

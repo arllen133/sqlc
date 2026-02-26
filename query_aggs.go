@@ -28,7 +28,6 @@ package sqlc
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/arllen133/sqlc/clause"
 )
@@ -270,27 +269,26 @@ func (q *QueryBuilder[T]) aggregateFloat(ctx context.Context, funcName, column s
 //   - Type depends on database driver and column type
 //   - Respects all query conditions (WHERE, soft delete, etc.)
 func (q *QueryBuilder[T]) aggregateAny(ctx context.Context, funcName, column string) (any, error) {
-	// Add dummy column to ensure valid SQL generation
-	b := q.builder.Columns("1")
-	sqlStr, args, err := b.ToSql()
-	if err != nil {
-		return nil, err
+	if q.err != nil {
+		return nil, q.err
 	}
 
-	// Build aggregate SQL
-	// Start with basic aggregate query
-	aggSql := fmt.Sprintf("SELECT %s(%s) FROM %s", funcName, column, q.schema.TableName())
+	// Build aggregate query using the builder directly.
+	// This preserves all WHERE, JOIN, etc. conditions without fragile SQL string parsing.
+	aggExpr := fmt.Sprintf("%s(%s)", funcName, column)
+	b := q.resolveBuilder().Columns(aggExpr)
 
-	// Extract FROM clause and everything after it from the original query
-	// This preserves WHERE, JOIN, ORDER BY, etc.
-	upperSql := strings.ToUpper(sqlStr)
-	fromIdx := strings.Index(upperSql, " FROM ")
-	if fromIdx != -1 {
-		// Replace the SELECT portion with our aggregate function
-		aggSql = fmt.Sprintf("SELECT %s(%s)%s", funcName, column, sqlStr[fromIdx:])
+	// Remove Limit/Offset for aggregate calculations
+	b = b.RemoveLimit().RemoveOffset()
+
+	query, args, err := b.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("sqlc: failed to build aggregate sql: %w", err)
 	}
 
 	var result any
-	err = q.session.QueryRow(ctx, aggSql, args...).Scan(&result)
-	return result, err
+	if err := q.session.Get(ctx, &result, query, args...); err != nil {
+		return nil, err
+	}
+	return result, nil
 }

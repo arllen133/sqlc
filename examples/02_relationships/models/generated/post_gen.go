@@ -100,6 +100,6 @@ var Post_Author = sqlc.HasOne(
 	clause.Column{Name: "id"},
 	clause.Column{Name: "user_id"},
 	func(p *models.Post, child *models.User) { p.Author = child },
-	func(p *models.Post) any { return p.UserID },
-	func(c *models.User) any { return c.ID },
+	func(p *models.Post) int64 { return p.UserID },
+	func(c *models.User) int64 { return c.ID },
 )

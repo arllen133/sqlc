@@ -158,10 +158,10 @@ func buildOnConflictUpsert(conflictCols, updateCols []string, excludedPrefix str
 type MySQLDialect struct{}
 
 // Name returns the MySQL dialect name.
-func (d *MySQLDialect) Name() string { return "mysql" }
+func (d MySQLDialect) Name() string { return "mysql" }
 
 // PlaceholderFormat returns MySQL's placeholder format (?).
-func (d *MySQLDialect) PlaceholderFormat() sq.PlaceholderFormat {
+func (d MySQLDialect) PlaceholderFormat() sq.PlaceholderFormat {
 	return sq.Question
 }
 
@@ -189,7 +189,7 @@ func (d *MySQLDialect) PlaceholderFormat() sq.PlaceholderFormat {
 //
 //	dialect.UpsertClause("users", []string{"email"}, []string{"name", "updated_at"})
 //	// Returns: "ON DUPLICATE KEY UPDATE name=VALUES(name),updated_at=VALUES(updated_at)"
-func (d *MySQLDialect) UpsertClause(tableName string, conflictCols []string, updateCols []string) string {
+func (d MySQLDialect) UpsertClause(tableName string, conflictCols []string, updateCols []string) string {
 	// MySQL doesn't support DO NOTHING, skip if no update columns
 	if len(updateCols) == 0 {
 		return ""
@@ -225,10 +225,10 @@ func (d *MySQLDialect) UpsertClause(tableName string, conflictCols []string, upd
 type PostgreSQLDialect struct{}
 
 // Name returns the PostgreSQL dialect name.
-func (d *PostgreSQLDialect) Name() string { return "postgres" }
+func (d PostgreSQLDialect) Name() string { return "postgres" }
 
 // PlaceholderFormat returns PostgreSQL's placeholder format ($1, $2, ...).
-func (d *PostgreSQLDialect) PlaceholderFormat() sq.PlaceholderFormat {
+func (d PostgreSQLDialect) PlaceholderFormat() sq.PlaceholderFormat {
 	return sq.Dollar
 }
 
@@ -257,7 +257,7 @@ func (d *PostgreSQLDialect) PlaceholderFormat() sq.PlaceholderFormat {
 //
 //	dialect.UpsertClause("users", []string{"email"}, []string{"name", "updated_at"})
 //	// Returns: "ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name,updated_at=EXCLUDED.updated_at"
-func (d *PostgreSQLDialect) UpsertClause(tableName string, conflictCols []string, updateCols []string) string {
+func (d PostgreSQLDialect) UpsertClause(tableName string, conflictCols []string, updateCols []string) string {
 	return buildOnConflictUpsert(conflictCols, updateCols, "EXCLUDED")
 }
 
@@ -281,10 +281,10 @@ func (d *PostgreSQLDialect) UpsertClause(tableName string, conflictCols []string
 type SQLiteDialect struct{}
 
 // Name returns the SQLite dialect name.
-func (d *SQLiteDialect) Name() string { return "sqlite3" }
+func (d SQLiteDialect) Name() string { return "sqlite3" }
 
 // PlaceholderFormat returns SQLite's placeholder format (?).
-func (d *SQLiteDialect) PlaceholderFormat() sq.PlaceholderFormat {
+func (d SQLiteDialect) PlaceholderFormat() sq.PlaceholderFormat {
 	return sq.Question
 }
 
@@ -314,7 +314,7 @@ func (d *SQLiteDialect) PlaceholderFormat() sq.PlaceholderFormat {
 //
 //	dialect.UpsertClause("users", []string{"email"}, []string{"name", "updated_at"})
 //	// Returns: "ON CONFLICT (email) DO UPDATE SET name=excluded.name,updated_at=excluded.updated_at"
-func (d *SQLiteDialect) UpsertClause(tableName string, conflictCols []string, updateCols []string) string {
+func (d SQLiteDialect) UpsertClause(tableName string, conflictCols []string, updateCols []string) string {
 	// SQLite uses lowercase "excluded", different from PostgreSQL's "EXCLUDED"
 	return buildOnConflictUpsert(conflictCols, updateCols, "excluded")
 }

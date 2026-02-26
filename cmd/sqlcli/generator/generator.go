@@ -197,15 +197,15 @@ var {{$.ModelName}}_{{.FieldName}} = sqlc.{{if eq .RelType "hasMany"}}HasMany{{e
 	clause.Column{Name: "{{.LocalKey}}"},
 	clause.Column{Name: "{{.ForeignKey}}"},
 	func(p *{{$.ParentPackage}}.{{$.ModelName}}, child *{{$.ParentPackage}}.{{.TargetType}}) { p.{{.FieldName}} = child },
-	func(p *{{$.ParentPackage}}.{{$.ModelName}}) any { return p.{{.ForeignKeyField}} },
-	func(c *{{$.ParentPackage}}.{{.TargetType}}) any { return c.{{.TargetPKField}} },
+	func(p *{{$.ParentPackage}}.{{$.ModelName}}) {{$.PKFieldType}} { return p.{{.ForeignKeyField}} },
+	func(c *{{$.ParentPackage}}.{{.TargetType}}) {{$.PKFieldType}} { return c.{{.TargetPKField}} },
 	{{else}}
 	clause.Column{Name: "{{.ForeignKey}}"},
 	clause.Column{Name: "{{.LocalKey}}"},
 	{{if eq .RelType "hasMany"}}func(p *{{$.ParentPackage}}.{{$.ModelName}}, children []*{{$.ParentPackage}}.{{.TargetType}}) { p.{{.FieldName}} = children },
 	{{else}}func(p *{{$.ParentPackage}}.{{$.ModelName}}, child *{{$.ParentPackage}}.{{.TargetType}}) { p.{{.FieldName}} = child },
-	{{end}}func(p *{{$.ParentPackage}}.{{$.ModelName}}) any { return p.{{$.PKFieldName}} },
-	func(c *{{$.ParentPackage}}.{{.TargetType}}) any { return c.{{.ForeignKeyField}} },
+	{{end}}func(p *{{$.ParentPackage}}.{{$.ModelName}}) {{$.PKFieldType}} { return p.{{$.PKFieldName}} },
+	func(c *{{$.ParentPackage}}.{{.TargetType}}) {{$.PKFieldType}} { return {{if .ForeignKeyFieldType}}{{.ForeignKeyFieldType}}(c.{{.ForeignKeyField}}){{else}}c.{{.ForeignKeyField}}{{end}} },
 	{{end}}
 )
 {{end}}
@@ -453,13 +453,13 @@ import (
 
 {{range .Relations}}
 // {{$.ModelName}}_{{.FieldName}} defines {{.RelType}} relation: {{$.ModelName}} has {{if eq .RelType "hasMany"}}many{{else}}one{{end}} {{.TargetType}}
-var {{$.ModelName}}_{{.FieldName}} = sqlc.{{if eq .RelType "hasMany"}}HasMany{{else}}HasOne{{end}}[{{$.ParentPackage}}.{{$.ModelName}}, {{$.ParentPackage}}.{{.TargetType}}](
+var {{$.ModelName}}_{{.FieldName}} = sqlc.{{if eq .RelType "hasMany"}}HasMany{{else}}HasOne{{end}}(
 	clause.Column{Name: "{{.ForeignKey}}"},
 	clause.Column{Name: "{{.LocalKey}}"},
 	{{if eq .RelType "hasMany"}}func(p *{{$.ParentPackage}}.{{$.ModelName}}, children []*{{$.ParentPackage}}.{{.TargetType}}) { p.{{.FieldName}} = children },
 	{{else}}func(p *{{$.ParentPackage}}.{{$.ModelName}}, child *{{$.ParentPackage}}.{{.TargetType}}) { p.{{.FieldName}} = child },
-	{{end}}func(p *{{$.ParentPackage}}.{{$.ModelName}}) any { return p.{{$.PKFieldName}} },
-	func(c *{{$.ParentPackage}}.{{.TargetType}}) any { return c.{{.ForeignKeyField}} },
+	{{end}}func(p *{{$.ParentPackage}}.{{$.ModelName}}) {{$.PKFieldType}} { return p.{{$.PKFieldName}} },
+	func(c *{{$.ParentPackage}}.{{.TargetType}}) {{$.PKFieldType}} { return {{if .ForeignKeyFieldType}}{{.ForeignKeyFieldType}}(c.{{.ForeignKeyField}}){{else}}c.{{.ForeignKeyField}}{{end}} },
 )
 {{end}}
 `
@@ -473,6 +473,7 @@ type RelationsData struct {
 	CliVersion    string
 	ModelName     string
 	PKFieldName   string
+	PKFieldType   string
 	Relations     []RelationMeta
 }
 
@@ -494,6 +495,7 @@ func GenerateRelationsFile(models []ModelMeta, outDir string) error {
 			CliVersion:    Version,
 			ModelName:     model.ModelName,
 			PKFieldName:   model.PKFieldName,
+			PKFieldType:   model.PKFieldType,
 			Relations:     model.Relations,
 		}
 		allRelations = append(allRelations, data)

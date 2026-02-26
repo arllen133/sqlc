@@ -29,12 +29,12 @@ type Department struct {
 func (Department) TableName() string { return "departments" }
 
 // DepartmentHasMembers defines the HasMany relation: Department -> Members
-var DepartmentHasMembers = sqlc.HasMany[Department, Member](
+var DepartmentHasMembers = sqlc.HasMany[Department, Member, int64](
 	clause.Column{Name: "department_id"},                           // Foreign key on Member
 	clause.Column{Name: "id"},                                      // Local key on Department
 	func(d *Department, members []*Member) { d.Members = members }, // Setter
-	func(d *Department) any { return d.ID },                        // Get local key
-	func(m *Member) any { return m.DepartmentID },                  // Get foreign key
+	func(d *Department) int64 { return d.ID },                      // Get local key
+	func(m *Member) int64 { return int64(m.DepartmentID) },         // Get foreign key
 )
 
 // Member Model (Advanced User)
@@ -850,12 +850,12 @@ func (ItemSchema) SoftDeleteValue() any             { return nil }
 func (ItemSchema) SetDeletedAt(m *Item)             {}
 func (ItemSchema) UpdateMap(m *Item) map[string]any { return nil }
 
-var TagHasItems = sqlc.HasMany[Tag, Item](
+var TagHasItems = sqlc.HasMany[Tag, Item, string](
 	clause.Column{Name: "tag_id"},
 	clause.Column{Name: "id"},
 	func(t *Tag, items []*Item) { /* Not strictly needed for logic test */ },
-	func(t *Tag) any { return t.ID },
-	func(i *Item) any { return i.TagID },
+	func(t *Tag) string { return t.ID },
+	func(i *Item) string { return i.TagID },
 )
 
 func TestPreloadStringKey(t *testing.T) {
@@ -884,12 +884,12 @@ func TestPreloadStringKey(t *testing.T) {
 	// 2. Preload and Verify
 	// We need a custom setter that we can inspect
 	var loadedItems []*Item
-	tagHasItemsInspected := sqlc.HasMany[Tag, Item](
+	tagHasItemsInspected := sqlc.HasMany[Tag, Item, string](
 		clause.Column{Name: "tag_id"},
 		clause.Column{Name: "id"},
 		func(t *Tag, items []*Item) { loadedItems = items },
-		func(t *Tag) any { return t.ID },
-		func(i *Item) any { return i.TagID },
+		func(t *Tag) string { return t.ID },
+		func(i *Item) string { return i.TagID },
 	)
 
 	tags, err := tagRepo.Query().
